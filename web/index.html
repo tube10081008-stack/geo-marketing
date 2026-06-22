@@ -35,6 +35,22 @@
   .reason { font-size:13px; padding:6px 0; border-bottom:1px dashed var(--line); }
   .action-title { font-weight:700; margin-bottom:6px; }
   pre.action { white-space:pre-wrap; font-family:inherit; font-size:14px; margin:0; }
+  /* 대화 */
+  #chat { display:none; margin-top:18px; }
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  .tab { padding:6px 12px; border:1px solid var(--line); border-radius:16px; background:#fff;
+         cursor:pointer; font-size:13px; }
+  .tab.active { background:var(--geo); color:#fff; border-color:var(--geo); }
+  .msgs { background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px;
+          min-height:120px; max-height:420px; overflow-y:auto; }
+  .bubble { margin:8px 0; } .bubble.user { text-align:right; }
+  .bubble .who { font-size:11px; color:#7a8a83; margin-bottom:2px; }
+  .bubble .body { display:inline-block; padding:9px 12px; border-radius:12px; max-width:85%;
+                  white-space:pre-wrap; text-align:left; font-size:14px; }
+  .bubble.user .body { background:var(--geo); color:#fff; }
+  .bubble.agent .body { background:#eef4f1; color:#1b2420; }
+  .inrow { display:flex; gap:8px; margin-top:8px; }
+  .inrow input { flex:1; } .inrow button { width:auto; margin:0; padding:11px 16px; }
 </style>
 </head>
 <body>
@@ -105,6 +121,22 @@
   </form>
 
   <div id="out"></div>
+
+  <section id="chat">
+    <h3 style="margin:18px 0 8px">세 에이전트와 대화</h3>
+    <div class="muted" style="margin-bottom:8px">자동(지오)이 적합한 에이전트로 라우팅하거나, 탭으로 직접 지목하세요.</div>
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-p="">🎯 자동(지오)</div>
+      <div class="tab" data-p="acq">🎣 획득</div>
+      <div class="tab" data-p="cvr">💳 전환</div>
+      <div class="tab" data-p="ret">🔁 유지</div>
+    </div>
+    <div class="msgs" id="msgs"></div>
+    <div class="inrow">
+      <input id="msg" placeholder="예: 리뷰를 어떻게 늘리죠?" />
+      <button id="send" type="button">보내기</button>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -124,6 +156,7 @@ f.addEventListener('submit', async (e) => {
   const fields = {};
   ['place_clicks','review_count','avg_rating','aov','visit_to_purchase_rate',
    'revisit_rate','nps','acq_grade','cvr_grade','ret_grade'].forEach(k => fields[k] = fd.get(k));
+  window._ctx = { merchant, fields };
 
   go.disabled = true; go.textContent = '분석 중…'; out.innerHTML = '';
   try {
@@ -134,6 +167,7 @@ f.addEventListener('submit', async (e) => {
     const d = await res.json();
     if (d.error) throw new Error(d.error);
     render(d);
+    startChat();
   } catch (err) {
     out.innerHTML = `<div class="card" style="color:#C0392B">전송 실패: ${err.message}</div>`;
   } finally {
@@ -162,6 +196,62 @@ function render(d) {
   if (d.disclaimer) html += `<div class="muted" style="padding:6px 2px">⚠️ ${d.disclaimer}</div>`;
   out.innerHTML = html;
 }
+
+// ── 세 에이전트와 대화(멀티턴) ──────────────────────────────
+let persona = '';      // ''=자동(지오 라우팅)
+let history = [];      // [{role:'user'|'agent', text}]
+const tabs = document.getElementById('tabs');
+const msgs = document.getElementById('msgs');
+const msgInput = document.getElementById('msg');
+const sendBtn = document.getElementById('send');
+
+tabs.addEventListener('click', (e) => {
+  const t = e.target.closest('.tab'); if (!t) return;
+  [...tabs.children].forEach(x => x.classList.remove('active'));
+  t.classList.add('active'); persona = t.dataset.p;
+});
+
+function startChat() {
+  document.getElementById('chat').style.display = 'block';
+  history = []; msgs.innerHTML = '';
+  bubble('agent', '🎯 지오', '위 액션 중 궁금한 걸 물어보거나, 탭으로 특정 에이전트를 지목해 대화하세요.', []);
+}
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function bubble(kind, who, text, cites) {
+  const div = document.createElement('div');
+  div.className = 'bubble ' + kind;
+  const chips = (cites && cites.length)
+    ? `<div>${cites.map(c => `<span class="chip">${c}</span>`).join('')}</div>` : '';
+  div.innerHTML = `<div class="who">${esc(who)}</div><div class="body">${esc(text)}</div>${chips}`;
+  msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function sendChat() {
+  const text = msgInput.value.trim();
+  if (!text || !window._ctx) return;
+  bubble('user', '나', text, []);
+  msgInput.value = ''; sendBtn.disabled = true;
+  try {
+    const res = await fetch('/api/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ merchant: window._ctx.merchant, fields: window._ctx.fields,
+                             history, message: text, persona: persona || null })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    bubble('agent', `${d.label} · ${d.billing.provider}`, d.reply, d.citations);
+    history.push({ role:'user', text });
+    history.push({ role:'agent', text: d.reply });
+  } catch (err) {
+    bubble('agent', '⚠️', '대화 실패: ' + err.message, []);
+  } finally {
+    sendBtn.disabled = false; msgInput.focus();
+  }
+}
+sendBtn.addEventListener('click', sendChat);
+msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 </script>
 </body>
 </html>

@@ -7,8 +7,8 @@
 web/
 ├─ index.html        # 온보딩 폼(빌드 불필요)
 ├─ api/
-│  ├─ advise.py      # 서버리스 엔드포인트 POST /api/advise
-│  └─ _geo.py        # 코퍼스+라우팅+페르소나+Gemini (stdlib only)
+│  ├─ advise.py      # POST /api/advise — 첫 만남 베이스라인 → 1회 종합 액션(self-contained)
+│  └─ chat.py        # POST /api/chat — 세 에이전트와 멀티턴 대화(라우팅·핸드오프·계측)
 └─ requirements.txt  # 비어있음(외부 패키지 없음)
 ```
 
