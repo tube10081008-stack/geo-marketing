@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>지오 — 소상공인 마케팅</title>
+<style>
+  :root { --geo:#2E7D5B; --bg:#F7F9F8; --line:#dde5e1; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,'Segoe UI',Roboto,'Apple SD Gothic Neo',sans-serif;
+         background:var(--bg); color:#1b2420; }
+  header { background:var(--geo); color:#fff; padding:18px 16px; }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; font-size:13px; opacity:.9; }
+  main { max-width:720px; margin:0 auto; padding:16px; }
+  fieldset { border:1px solid var(--line); border-radius:12px; margin:14px 0; padding:14px; background:#fff; }
+  legend { font-weight:700; padding:0 6px; }
+  label { display:block; font-size:13px; margin:10px 0 4px; }
+  input, select, textarea { width:100%; padding:9px; border:1px solid var(--line);
+         border-radius:8px; font-size:14px; }
+  .row { display:flex; gap:10px; } .row > div { flex:1; }
+  .consent { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; }
+  .consent input { width:auto; }
+  button { background:var(--geo); color:#fff; border:0; border-radius:10px; padding:13px;
+           font-size:15px; font-weight:700; width:100%; cursor:pointer; margin-top:8px; }
+  button:disabled { opacity:.6; cursor:default; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px; margin:10px 0; }
+  .grade { display:inline-block; padding:2px 10px; border-radius:12px; font-weight:700; font-size:13px; }
+  .gA{color:#2E7D5B;border:1px solid #2E7D5B;} .gB{color:#6BA368;border:1px solid #6BA368;}
+  .gC{color:#E0A100;border:1px solid #E0A100;} .gD{color:#C0392B;border:1px solid #C0392B;}
+  .chip { display:inline-block; background:#eef4f1; color:#2E7D5B; border-radius:10px;
+          padding:2px 8px; font-size:11px; margin:2px 4px 0 0; }
+  .muted { color:#7a8a83; font-size:12px; }
+  .reason { font-size:13px; padding:6px 0; border-bottom:1px dashed var(--line); }
+  .action-title { font-weight:700; margin-bottom:6px; }
+  pre.action { white-space:pre-wrap; font-family:inherit; font-size:14px; margin:0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎯 지오 — 소상공인 마케팅 에이전트</h1>
+  <p>첫 만남(기초자료 수집) → 근거기반 마케팅 액션. SCI 논문 코퍼스 인용.</p>
+</header>
+<main>
+  <form id="f">
+    <fieldset>
+      <legend>공통</legend>
+      <label>상호</label><input name="merchant" placeholder="예: 지오네 고깃집" />
+      <div class="row">
+        <div><label>업종</label>
+          <select name="industry">
+            <option value="food">외식/음식점</option><option value="beauty">미용/뷰티</option>
+            <option value="retail">소매/판매</option><option value="cafe">카페/디저트</option>
+            <option value="service">생활서비스</option><option value="etc">기타</option>
+          </select></div>
+        <div><label>위치·상권</label><input name="location" placeholder="예: 서울 합정" /></div>
+      </div>
+      <div class="row">
+        <div><label>월 매출(원)</label><input name="monthly_revenue" inputmode="numeric" placeholder="30000000" /></div>
+        <div><label>90일 목표 성장률(%)</label><input name="growth_goal" inputmode="decimal" placeholder="15" /></div>
+      </div>
+      <div class="consent">
+        <input type="checkbox" id="consent" />
+        <label for="consent" style="margin:0">고객데이터 위탁처리 동의 (RFM 분석 전제 · 개인정보 게이트)</label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>🎣 획득 — 노출·리뷰·평점</legend>
+      <div class="row">
+        <div><label>플레이스 클릭(월)</label><input name="place_clicks" inputmode="numeric" placeholder="1500" /></div>
+        <div><label>리뷰 개수</label><input name="review_count" inputmode="numeric" placeholder="120" /></div>
+      </div>
+      <div class="row">
+        <div><label>평균 평점(0~5)</label><input name="avg_rating" inputmode="decimal" placeholder="4.1" /></div>
+        <div><label>데이터 등급</label><select name="acq_grade" class="g">
+          <option>A</option><option>B</option><option selected>C</option><option>D</option></select></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>💳 전환 — 객단가·전환율</legend>
+      <div class="row">
+        <div><label>객단가 AOV(원)</label><input name="aov" inputmode="numeric" placeholder="28000" /></div>
+        <div><label>전환율(%)</label><input name="visit_to_purchase_rate" inputmode="decimal" placeholder="55" /></div>
+      </div>
+      <label>데이터 등급</label>
+      <select name="cvr_grade"><option>A</option><option selected>B</option><option>C</option><option>D</option></select>
+    </fieldset>
+
+    <fieldset>
+      <legend>🔁 유지 — 재방문·NPS</legend>
+      <div class="row">
+        <div><label>재방문율(%)</label><input name="revisit_rate" inputmode="decimal" placeholder="30" /></div>
+        <div><label>NPS(-100~100)</label><input name="nps" inputmode="numeric" placeholder="22" /></div>
+      </div>
+      <label>데이터 등급</label>
+      <select name="ret_grade"><option>A</option><option>B</option><option>C</option><option selected>D</option></select>
+      <label>지오에게 한마디(선택)</label>
+      <input name="question" placeholder="예: 신규 손님을 더 끌고 싶어요" />
+    </fieldset>
+
+    <button type="submit" id="go">지오에게 액션 받기</button>
+  </form>
+
+  <div id="out"></div>
+</main>
+
+<script>
+const f = document.getElementById('f');
+const out = document.getElementById('out');
+const go = document.getElementById('go');
+const gradeClass = g => ({A:'gA',B:'gB',C:'gC',D:'gD'}[g]||'gC');
+
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!document.getElementById('consent').checked) {
+    alert('고객데이터 위탁처리 동의가 필요합니다(개인정보 게이트).'); return;
+  }
+  const fd = new FormData(f);
+  const merchant = fd.get('merchant') || '내 가게';
+  const question = fd.get('question') || '';
+  const fields = {};
+  ['place_clicks','review_count','avg_rating','aov','visit_to_purchase_rate',
+   'revisit_rate','nps','acq_grade','cvr_grade','ret_grade'].forEach(k => fields[k] = fd.get(k));
+
+  go.disabled = true; go.textContent = '분석 중…'; out.innerHTML = '';
+  try {
+    const res = await fetch('/api/advise', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ merchant, fields, question })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    render(d);
+  } catch (err) {
+    out.innerHTML = `<div class="card" style="color:#C0392B">전송 실패: ${err.message}</div>`;
+  } finally {
+    go.disabled = false; go.textContent = '지오에게 액션 받기';
+  }
+});
+
+function render(d) {
+  const r = d.routing, b = d.billing;
+  let html = `<div class="card">
+    <div><b>${d.merchant}</b> · 종합 데이터등급
+      <span class="grade ${gradeClass(d.overall_data_grade)}">${d.overall_data_grade||'-'}</span></div>
+    <div class="muted" style="margin-top:6px">엔진: ${b.provider} · 라우터: ${r.router}</div>
+    <div class="muted">이번 분석 <b>${b.credits_charged} 크레딧</b> 차감 (원가 \$${b.raw_cost_usd})</div>
+  </div>`;
+  html += `<div class="card"><div class="action-title">지오 라우팅</div>` +
+    Object.values(r.reasons).map(x => `<div class="reason">🧭 ${x}</div>`).join('') + `</div>`;
+  d.actions.forEach(a => {
+    html += `<div class="card">
+      <div class="action-title">${a.label} <span class="muted">· ${a.kpi}</span></div>
+      <pre class="action">${a.action}</pre>
+      <div>${a.citations.map(m => `<span class="chip">${m}</span>`).join('')}</div>
+      <div class="muted" style="margin-top:4px">gen: ${a.generator_model}</div>
+    </div>`;
+  });
+  if (d.disclaimer) html += `<div class="muted" style="padding:6px 2px">⚠️ ${d.disclaimer}</div>`;
+  out.innerHTML = html;
+}
+</script>
+</body>
+</html>

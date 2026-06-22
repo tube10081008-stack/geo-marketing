@@ -1,0 +1,10 @@
+# 마케팅 오케스트라 백엔드 (P1) — poc/backend와 동일 스택 재사용
+Django>=5.2,<5.3
+djangorestframework>=3.15
+django-cors-headers>=4.0
+# 에이전트 실연동(라이브 모드). 미설치/무키면 StubProvider로 동작.
+anthropic>=0.40
+# 운영(선택): PostgreSQL + pgvector(코퍼스 Dense 검색)
+# psycopg[binary]>=3.1
+# dj-database-url>=2.1
+# pgvector>=0.3
