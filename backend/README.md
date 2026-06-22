@@ -25,6 +25,12 @@ python manage.py runserver
 
 모든 베이스라인엔 **데이터 신뢰등급(A/B/C/D)**(intake §1). `Merchant.overall_grade()`는 보수적으로 최악 등급을 종합한다.
 
+## 계정·영속 (P1+)
+- **DRF 토큰 인증**(`accounts/`): `register`/`login`/`me`. 헤더 `Authorization: Token <키>`.
+- **소유 격리**: `Merchant.owner`(FK User) — 각 계정은 자기 업체만 조회/수정(검증됨, 타계정 404).
+- **대화 영속**: `ChatMessage`(업체별 user/agent/system 로그) → 새 기기/재접속에 `history`로 복원.
+- 배포·엔드포인트 전체: [DEPLOY.md](./DEPLOY.md).
+
 ## API (api/v1/)
 | 메서드·경로 | 설명 |
 | --- | --- |

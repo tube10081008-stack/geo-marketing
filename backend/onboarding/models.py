@@ -12,6 +12,7 @@
 - RetentionBaseline     : 🔁 유지 KPI 베이스라인 (intake §2.3) — 재방문·LTV·이탈
 - CustomerTransaction   : RFM/CLV 원천 거래로그 [M8] — ※가명·민감정보 (intake §4)
 """
+from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -40,6 +41,11 @@ class Merchant(models.Model):
         SERVICE = "service", "생활서비스"
         ETC = "etc", "기타"
 
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, verbose_name="소유 계정",
+        on_delete=models.CASCADE, related_name="merchants", null=True, blank=True,
+        help_text="계정별 워크스페이스. 각 사용자는 자기 업체만 조회/수정.",
+    )
     name = models.CharField("상호", max_length=200)
     industry = models.CharField("업종", max_length=20, choices=Industry.choices)
     sub_category = models.CharField(
@@ -307,3 +313,29 @@ class CustomerTransaction(models.Model):
 
     def __str__(self):
         return f"{self.merchant.name} · {self.customer_key} · {self.occurred_on}"
+
+
+class ChatMessage(models.Model):
+    """에이전트 대화 영속(세션 지속) — 업체(워크스페이스)별 대화 로그."""
+
+    class Role(models.TextChoices):
+        USER = "user", "사용자"
+        AGENT = "agent", "에이전트"
+        SYSTEM = "system", "시스템"
+
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.CASCADE, related_name="messages", verbose_name="업체",
+    )
+    role = models.CharField("역할", max_length=8, choices=Role.choices)
+    persona = models.CharField("페르소나", max_length=8, blank=True, default="")  # acq|cvr|ret
+    text = models.TextField("내용")
+    created_at = models.DateTimeField("작성", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "대화 메시지"
+        verbose_name_plural = "대화 메시지"
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["merchant", "created_at"])]
+
+    def __str__(self):
+        return f"{self.merchant.name} · {self.role}: {self.text[:24]}"

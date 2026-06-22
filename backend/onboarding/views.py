@@ -8,6 +8,7 @@
 """
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import CustomerTransaction, Merchant
@@ -19,10 +20,19 @@ from .serializers import (
 
 
 class MerchantViewSet(viewsets.ModelViewSet):
-    queryset = Merchant.objects.all().select_related(
-        "acquisition", "conversion", "retention"
-    )
+    """계정별 워크스페이스 — 로그인 사용자는 자기 업체만 조회/생성/수정."""
+
     serializer_class = MerchantIntakeSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            Merchant.objects.filter(owner=self.request.user)
+            .select_related("acquisition", "conversion", "retention")
+        )
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user)
 
     @action(detail=True, methods=["get"])
     def card(self, request, pk=None):

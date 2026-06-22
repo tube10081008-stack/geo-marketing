@@ -37,8 +37,10 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # 서드파티
     "rest_framework",
+    "rest_framework.authtoken",
     "corsheaders",
     # 로컬 앱
+    "accounts",
     "onboarding",
 ]
 
@@ -52,6 +54,15 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# WhiteNoise(운영 정적파일) — 설치돼 있을 때만 활성화.
+try:
+    import whitenoise  # noqa: F401
+
+    MIDDLEWARE.insert(2, "whitenoise.middleware.WhiteNoiseMiddleware")
+    _WHITENOISE = True
+except ImportError:
+    _WHITENOISE = False
 
 ROOT_URLCONF = "config.urls"
 
@@ -111,6 +122,25 @@ else:
     CORS_ALLOW_ALL_ORIGINS = True
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
 }
+
+# 운영 정적파일(WhiteNoise) — DEBUG=False & 설치 시 압축 매니페스트 스토리지
+if _WHITENOISE and not DEBUG:
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    }
+
+# 운영 보안 헤더(DEBUG=False)
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", False)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
