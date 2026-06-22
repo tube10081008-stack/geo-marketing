@@ -123,8 +123,11 @@
   <div id="out"></div>
 
   <section id="chat">
-    <h3 style="margin:18px 0 8px">세 에이전트와 대화</h3>
-    <div class="muted" style="margin-bottom:8px">자동(지오)이 적합한 에이전트로 라우팅하거나, 탭으로 직접 지목하세요.</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:18px 0 8px">
+      <h3 style="margin:0">세 에이전트와 대화</h3>
+      <button type="button" id="reset" style="width:auto;margin:0;padding:6px 12px;font-size:12px;background:#fff;color:#7a8a83;border:1px solid var(--line)">🗑 새로 시작</button>
+    </div>
+    <div class="muted" style="margin-bottom:8px">자동(지오)이 적합한 에이전트로 라우팅하거나(여러 영역이면 2인이 협업), 탭으로 직접 지목하세요. 대화 중 "평점 4.5예요"처럼 말하면 베이스라인이 갱신됩니다.</div>
     <div class="tabs" id="tabs">
       <div class="tab active" data-p="">🎯 자동(지오)</div>
       <div class="tab" data-p="acq">🎣 획득</div>
@@ -215,6 +218,7 @@ function startChat() {
   document.getElementById('chat').style.display = 'block';
   history = []; msgs.innerHTML = '';
   bubble('agent', '🎯 지오', '위 액션 중 궁금한 걸 물어보거나, 탭으로 특정 에이전트를 지목해 대화하세요.', []);
+  saveSession();
 }
 
 function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
@@ -241,9 +245,18 @@ async function sendChat() {
     });
     const d = await res.json();
     if (d.error) throw new Error(d.error);
-    bubble('agent', `${d.label} · ${d.billing.provider}`, d.reply, d.citations);
+    // 베이스라인 갱신 반영
+    if (d.updated_fields && Object.keys(d.updated_fields).length) {
+      Object.assign(window._ctx.fields, d.updated_fields);
+      const pairs = Object.entries(d.updated_fields)
+        .map(([k, v]) => `${FIELD_LABELS[k] || k} ${v}`).join(', ');
+      bubble('agent', '📊 베이스라인 갱신', `새 정보로 KPI를 갱신했어요: ${pairs}. 이후 답변에 반영됩니다.`, []);
+    }
+    // 협업: 여러 에이전트가 순서대로(둘째가 첫째를 참조) 답변
+    (d.turns || []).forEach(t => bubble('agent', `${t.label} · ${d.billing.provider}`, t.reply, t.citations));
     history.push({ role:'user', text });
-    history.push({ role:'agent', text: d.reply });
+    (d.turns || []).forEach(t => history.push({ role:'agent', text: t.reply }));
+    saveSession();
   } catch (err) {
     bubble('agent', '⚠️', '대화 실패: ' + err.message, []);
   } finally {
@@ -252,6 +265,39 @@ async function sendChat() {
 }
 sendBtn.addEventListener('click', sendChat);
 msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+
+// ── 세션 영속화(localStorage) ──────────────────────────────
+const FIELD_LABELS = { avg_rating:'평점', review_count:'리뷰수', place_clicks:'플레이스클릭',
+  aov:'객단가', visit_to_purchase_rate:'전환율', revisit_rate:'재방문율', nps:'NPS' };
+const SKEY = 'geo_session_v1';
+
+function saveSession() {
+  try {
+    localStorage.setItem(SKEY, JSON.stringify({
+      ctx: window._ctx, history, report: out.innerHTML, chat: msgs.innerHTML,
+    }));
+  } catch (e) { /* 용량 초과 등 무시 */ }
+}
+
+document.getElementById('reset').addEventListener('click', () => {
+  localStorage.removeItem(SKEY); location.reload();
+});
+
+(function restore() {
+  let s;
+  try { s = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch (e) { return; }
+  if (!s || !s.ctx) return;
+  window._ctx = s.ctx; history = s.history || [];
+  if (s.report) out.innerHTML = s.report;
+  if (s.chat !== undefined) {
+    document.getElementById('chat').style.display = 'block';
+    msgs.innerHTML = s.chat;
+  }
+  // 폼 입력값 복원(상호 + 지표)
+  const set = (name, val) => { const el = f.elements[name]; if (el && val != null) el.value = val; };
+  set('merchant', s.ctx.merchant);
+  Object.entries(s.ctx.fields || {}).forEach(([k, v]) => set(k, v));
+})();
 </script>
 </body>
 </html>

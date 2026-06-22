@@ -8,6 +8,7 @@ stateless: 대화이력은 프런트가 들고 매 턴 재전송(Messages API �
 import json
 import math
 import os
+import re
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
@@ -111,59 +112,95 @@ def _card_summary(fields):
 
 
 def route_chat(message, fields, forced, provider, meter):
+    """깨울 페르소나 리스트(1~2). 여러 영역에 걸친 질문이면 협업(2인)."""
     if forced in ("acq", "cvr", "ret"):
-        return forced
+        return [forced]
     low = (message or "").lower()
     scores = {p: sum(1 for kw in kws if kw in low) for p, kws in KEYWORDS.items()}
-    best = max(scores, key=scores.get)
-    if scores[best] > 0:
-        return best
-    # 키워드로 못 정하면 저가 라우터 모델(있을 때)
+    ranked = [p for p in sorted(scores, key=lambda x: scores[x], reverse=True) if scores[p] > 0]
+    if len(ranked) >= 2:
+        return ranked[:2]          # 협업: 상위 2 페르소나
+    if len(ranked) == 1:
+        return ranked
+    # 키워드 0 → 저가 라우터 모델(있을 때) / 기본 전환
     if provider.name != "stub":
         text, (i, o) = provider.complete(
             provider.router_model,
-            "마케팅 의도 분류기. acq(획득)/cvr(전환)/ret(유지) 중 하나만 답하라.",
-            message, max_tokens=8)
+            "마케팅 의도 분류기. acq(획득)/cvr(전환)/ret(유지) 중 관련된 것만 콤마로 답하라.",
+            message, max_tokens=12)
         meter.add(provider.router_model, i, o)
-        for p in ("acq", "cvr", "ret"):
-            if p in text:
-                return p
-    return "cvr"
+        picks = [p for p in ("acq", "cvr", "ret") if p in text]
+        if picks:
+            return picks[:2]
+    return ["cvr"]
 
 
-def _system(persona, merchant, fields):
+# 대화 중 지표 변경 감지 → 베이스라인 갱신(무료 정규식, 휴리스틱)
+_PATTERNS = {
+    "avg_rating": r"평점\s*(?:은|이|:|을)?\s*([0-5](?:\.\d)?)",
+    "visit_to_purchase_rate": r"전환(?:율)?\s*(?:은|이|:)?\s*(\d{1,3})\s*%?",
+    "revisit_rate": r"재방문(?:율)?\s*(?:은|이|:)?\s*(\d{1,3})\s*%?",
+    "review_count": r"리뷰\s*(?:가|는|를|:)?\s*(\d{2,6})\s*(?:개|건)?",
+    "aov": r"객단가\s*(?:은|는|이|:)?\s*([\d,]{4,})",
+    "nps": r"(?i)nps\s*(?:은|는|이|:)?\s*(-?\d{1,3})",
+    "place_clicks": r"클릭\s*(?:은|는|이|:)?\s*(\d{2,7})",
+}
+
+
+def extract_updates(message):
+    out = {}
+    for field, pat in _PATTERNS.items():
+        m = re.search(pat, message or "")
+        if m:
+            out[field] = m.group(1).replace(",", "")
+    return out
+
+
+def _system(persona, merchant, fields, collab=None):
     label, kpi = PERSONA_META[persona]
     cites = "\n".join(f"- [{m}] {c} ({s})" for m, c, s in CORPUS[persona])
     others = ", ".join(PERSONA_META[p][0] for p in ("acq", "cvr", "ret") if p != persona)
-    return (f"너는 소상공인 '{merchant}'의 마케팅 {label} 담당 에이전트다. 담당 KPI: {kpi}.\n"
+    base = (f"너는 소상공인 '{merchant}'의 마케팅 {label} 담당 에이전트다. 담당 KPI: {kpi}.\n"
             f"베이스라인: {_card_summary(fields)}.\n"
             f"근거 코퍼스(관련 시 반드시 [M#] 인용):\n{cites}\n"
             f"너는 획득·전환·유지 3인 팀의 일원이다. 네 영역 밖 질문이면 {others} 에이전트에게 넘기라고 안내하라.\n"
             "사장님과 대화하듯 간결하고 실행가능하게 답하라. 2~4문장. 출처를 댈 수 없는 단정은 금지.")
+    if collab:
+        base += (f"\n\n[협업] 동료 에이전트가 먼저 이렇게 답했다:\n\"{collab}\"\n"
+                 "이를 참조하되 중복은 피하고, 네 전문영역 관점에서 보완·연결하라(시너지 한 줄).")
+    return base
 
 
 def run_chat(merchant, fields, history, message, forced=None):
     provider = get_provider()
     meter = Meter()
-    persona = route_chat(message, fields, forced, provider, meter)
-    label, kpi = PERSONA_META[persona]
+    fields = dict(fields or {})
+    updates = extract_updates(message)
+    fields.update(updates)  # 갱신된 베이스라인으로 답변 맥락 구성
 
-    # 대화이력 → Gemini contents(user/model)
-    contents = []
+    personas = route_chat(message, fields, forced, provider, meter)
+
+    # 대화이력 → contents(user/model)
+    base_contents = []
     for h in history or []:
         role = "user" if h.get("role") == "user" else "model"
-        contents.append({"role": role, "parts": [{"text": h.get("text", "")}]})
-    contents.append({"role": "user", "parts": [{"text": message}]})
+        base_contents.append({"role": role, "parts": [{"text": h.get("text", "")}]})
+    base_contents.append({"role": "user", "parts": [{"text": message}]})
 
-    reply, (i, o) = provider.chat(_system(persona, merchant or "내 가게", fields), contents)
-    meter.add(provider.generator_model, i, o)
+    turns = []
+    collab = None
+    for p in personas:
+        label, kpi = PERSONA_META[p]
+        system = _system(p, merchant or "내 가게", fields, collab)
+        reply, (i, o) = provider.chat(system, base_contents)
+        meter.add(provider.generator_model, i, o)
+        turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,
+                      "citations": [m for m, _, _ in CORPUS[p]]})
+        collab = f"{label}: {reply}"  # 다음 페르소나가 참조
 
     return {
-        "persona": persona,
-        "label": label,
-        "kpi": kpi,
-        "reply": reply,
-        "citations": [m for m, _, _ in CORPUS[persona]],
+        "turns": turns,
+        "updated_fields": updates,
         "billing": {"provider": provider.name, "credits_charged": meter.credits(),
                     "raw_cost_usd": round(meter.cost(), 6)},
     }
