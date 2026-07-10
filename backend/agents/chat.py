@@ -33,7 +33,17 @@ def _card_summary(card):
             f"재방문 {r.get('revisit_rate_pct')}%, NPS {r.get('nps')}")
 
 
+# 목표/희망 발화("평점을 4.5로 올리고 싶어요")를 사실로 오인하지 않기 위한 의도어 가드(REVIEW §2)
+_INTENT_RE = re.compile(r"싶|려면|할까|목표|어떻게|되고 싶")
+
+# 비용·공격 방어(REVIEW §2): 서버가 신뢰 경계 — 프런트가 보낸 값은 절단한다
+MAX_MESSAGE_CHARS = 1000
+MAX_HISTORY_MESSAGES = 12
+
+
 def extract_updates(message):
+    if _INTENT_RE.search(message or ""):
+        return {}
     out = {}
     for field, pat in _PATTERNS.items():
         m = re.search(pat, message or "")
@@ -89,9 +99,14 @@ def run_chat(merchant, history, message, forced=None):
     card = merchant.baseline_card()
     provider = get_provider()
     meter = Meter()
+    message = (message or "")[:MAX_MESSAGE_CHARS]
     personas = route(message, forced, provider, meter)
 
-    messages = list(history or []) + [{"role": "user", "text": message}]
+    trimmed = [
+        {"role": h.get("role"), "text": (h.get("text") or "")[:MAX_MESSAGE_CHARS]}
+        for h in (history or [])[-MAX_HISTORY_MESSAGES:]
+    ]
+    messages = trimmed + [{"role": "user", "text": message}]
     turns, collab = [], None
     for p in personas:
         label, kpi = _label(p)
@@ -102,9 +117,11 @@ def run_chat(merchant, history, message, forced=None):
                       "citations": [e.mid for e in retrieve(p)]})
         collab = f"{label}: {reply}"
 
+    # Stub(데모)엔 크레딧을 청구하지 않는다(REVIEW §2 — 정직한 과금)
+    credits = 0 if provider.name == "stub" else meter.credits()
     return {
         "turns": turns,
         "updated_fields": extract_updates(message),
-        "billing": {"provider": provider.name, "credits_charged": meter.credits(),
+        "billing": {"provider": provider.name, "credits_charged": credits,
                     "raw_cost_usd": round(meter.total_cost_usd(), 6)},
     }

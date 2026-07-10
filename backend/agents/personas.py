@@ -27,8 +27,8 @@ def _draft(persona: str, card: dict) -> tuple[str, list[str]]:
         target = f"평점 {rating}→{round((rating or 4.0)+0.2, 1)}, 리뷰수 +20%(4주)"
         action = (
             f"네이버 플레이스 노출·리뷰 보강. 만족 고객에게 영수증 리뷰 요청 도입. "
-            f"목표: {target}. 근거: 평점 1점↑→매출 5~9%↑(독립업체)[M11], "
-            f"리뷰 개수가 노출순위 좌우[M15], 신규도달=성장 동력[M1]."
+            f"목표: {target}. 근거: 평점↑→매출↑(美 독립식당 5~9%, 방향성)[M11], "
+            f"리뷰 개수가 노출순위 좌우(국내)[M15], 신규도달=성장 동력[M1]."
         )
     elif persona == "cvr":
         rating = acq.get("avg_rating")
@@ -38,18 +38,19 @@ def _draft(persona: str, card: dict) -> tuple[str, list[str]]:
         target = f"전환율 {conv}%→{round((conv or 55)+3, 1)}%, 객단가 유지"
         action = (
             f"평점 0.1~0.2 상향 + '오늘만' 손실프레임 오퍼 A/B. 가격 끝자리 9 적용 실험. "
-            f"목표: {target}(객단가 {aov}원 기준). 근거: 반별점↑→매진 49%↑[M12], "
-            f"9-끝자리 수요↑[M5], 손실회피 프레이밍[M4]."
+            f"목표: {target}(객단가 {aov}원 기준). 근거: 반별점↑→예약매진 +19%p(美)[M12], "
+            f"9-끝자리 수요↑(세일 병용 시 약화)[M5], 손실회피 프레이밍(A/B 검증 전제)[M4]."
         )
     else:  # ret
         revisit = ret.get("revisit_rate_pct")
         nps = ret.get("nps")
-        mids = ["M7", "M8", "M13"]
+        mids = ["M7", "M8", "M13", "M10", "M16"]
         target = f"재방문율 {revisit}%→{round((revisit or 30)+5, 1)}%, NPS {nps}→{(nps or 30)+5}"
         action = (
-            f"RFM 단골 세분화 후 이탈 임박 세그먼트에 재방문 쿠폰. 부정리뷰 24h 내 응대 룰. "
-            f"목표: {target}. 근거: 이탈 5%↓→이익 25~85%↑[M7], RFM·CLV 세분화[M8], "
-            f"부정리뷰가 더 무겁다→신속대응[M13]."
+            f"RFM 단골 세분화 후 이탈 임박 세그먼트에 재방문 쿠폰(수익성 세그먼트 우선[M10]). "
+            f"부정리뷰 24h 내 응대 룰. 목표: {target}. "
+            f"근거: 이탈↓→이익↑(산업별 사례 25~85%)[M7], RFM·CLV 세분화[M8], "
+            f"부정리뷰가 더 무겁다→신속대응[M13]. NPS는 보조지표로만[M9→M16]."
         )
     return action, mids
 

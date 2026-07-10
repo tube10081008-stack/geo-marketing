@@ -78,6 +78,7 @@
 **The One Number You Need to Grow** — Frederick F. Reichheld, 2003. *Harvard Business Review*, 81(12), 46–55. (Net Promoter Score)
 - **핵심:** "친구에게 추천하시겠습니까?"(0–10) 한 문항이 성장의 최선예측. 추천자(9–10)−비추천자(0–6) = **NPS**.
 - **우리에게(유지→획득):** 소상공인용 *초경량 만족도 측정* + 추천(입소문) 트리거. RET KPI이자 ACQ 환류 신호.
+- ⚠️ **반론 [M16]:** "성장 최선예측" 주장은 학계 재현 실패 — NPS는 **간편한 보조지표**로만 사용하고 단독 의사결정 근거로 쓰지 않는다.
 - **적용:** orchestrator.md §3.3, §5(RET→ACQ).
 
 ### <a id="m10"></a>[M10] The Mismanagement of Customer Loyalty — 충성≠수익
@@ -85,6 +86,12 @@
 - **핵심:** **충성 고객이 곧 수익 고객은 아니다.** 고객은 충성×수익 2축의 4분면. "충성고객은 비용 적고 더 지불한다"는 통념을 데이터로 반박.
 - **우리에게(유지/지오):** RET가 *모든 재방문을 똑같이* 밀면 적자. **수익성 기준 세분화**가 필수 → 과대 리텐션 투자 방지(§4 정직한 귀인과 연결).
 - **적용:** orchestrator.md §3.3, §4.3.
+
+### <a id="m16"></a>[M16] NPS 우월성 재현 실패 (반론 — 자기교정용)
+**A Longitudinal Examination of Net Promoter and Firm Revenue Growth** — Timothy L. Keiningham, Bruce Cooil, Tor Wallin Andreassen & Lerzan Aksoy, 2007. *Journal of Marketing*, 71(3), 39–51. (MSI/H. Paul Root Award 수상)
+- **핵심:** 노르웨이 고객만족바로미터(21개사, 15,500+ 인터뷰) 종단 데이터로 Reichheld의 분석을 재현 → NPS가 만족도 등 타 지표 대비 **"명백히 우월"하다는 주장 재현 실패**.
+- **우리에게:** [M9] 사용 시 필수 병기. 우리 코퍼스가 **자기 근거의 반론까지 보유**함으로써 "출처를 대는 시스템"의 신뢰를 지킨다. NPS는 측정이 간편해 소상공인 실무엔 유용하되, 예측력 주장은 하지 않는다.
+- **적용:** REVIEW.md §1, 유지(RET) 페르소나 프롬프트.
 
 ---
 

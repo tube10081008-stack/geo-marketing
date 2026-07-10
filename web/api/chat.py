@@ -12,16 +12,19 @@ import re
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
+# 문구 원칙(REVIEW.md): 원 연구 맥락(국가·업태)을 벗기지 않는다 — 수치는 방향성 근거.
 CORPUS = {
-    "acq": [("M1", "신규도달(침투)+정신적/물리적 가용성이 성장 동력", "Sharp 2010"),
-            ("M11", "리뷰 평점 1점↑→매출 5~9%↑(독립업체)", "Luca 2011, HBS"),
-            ("M15", "리뷰 개수·품질이 음식점 노출순위 좌우(국내)", "엄해정·진현정 2024")],
-    "cvr": [("M4", "손실회피·프레이밍·기준점", "Kahneman & Tversky 1979"),
-            ("M5", "9-끝자리 가격이 현장실험 수요↑", "Anderson & Simester 2003"),
-            ("M12", "반 별점↑→매진 49%↑", "Anderson & Magruder 2012")],
-    "ret": [("M7", "이탈률 5%p↓→이익 25~85%↑", "Reichheld & Sasser 1990"),
+    "acq": [("M1", "매출성장 주동력은 신규도달(침투)+가용성", "Sharp 2010"),
+            ("M11", "평점 1점↑→매출 5~9%↑(美 독립식당, 방향성 근거)", "Luca 2011, HBS"),
+            ("M15", "리뷰 개수·품질이 노출순위 좌우(국내 외식)", "엄해정·진현정 2024")],
+    "cvr": [("M4", "손실회피·프레이밍(카피는 A/B 검증 후 채택)", "Kahneman & Tversky 1979"),
+            ("M5", "9-끝자리 수요↑(美 통판, 세일 병용 시 약화)", "Anderson & Simester 2003"),
+            ("M12", "반 별점↑→예약매진 +19%p(美)", "Anderson & Magruder 2012")],
+    "ret": [("M7", "이탈률↓→이익↑(산업별 사례 25~85%, 일반화 금지)", "Reichheld & Sasser 1990"),
             ("M8", "RFM 세분화→CLV 추정", "Fader·Hardie·Lee 2005"),
-            ("M13", "부정 리뷰가 더 무겁다→신속대응", "Chevalier & Mayzlin 2006")],
+            ("M13", "부정 리뷰가 더 무겁다→신속대응", "Chevalier & Mayzlin 2006"),
+            ("M10", "충성≠수익 — 수익성 세그먼트 우선", "Reinartz & Kumar 2002"),
+            ("M16", "(반론) NPS 우월성 재현 실패 — 보조지표로만", "Keiningham et al. 2007")],
 }
 PERSONA_META = {
     "acq": ("🎣 획득", "신규유입·노출·리뷰수"),
@@ -147,7 +150,16 @@ _PATTERNS = {
 }
 
 
+# 목표/희망 발화("평점을 4.5로 올리고 싶어요")를 사실로 오인하지 않는 의도어 가드(REVIEW)
+_INTENT_RE = re.compile(r"싶|려면|할까|목표|어떻게|되고 싶")
+# 비용·공격 방어: 서버가 신뢰 경계 — 프런트가 보낸 값은 절단
+MAX_MESSAGE_CHARS = 1000
+MAX_HISTORY_MESSAGES = 12
+
+
 def extract_updates(message):
+    if _INTENT_RE.search(message or ""):
+        return {}
     out = {}
     for field, pat in _PATTERNS.items():
         m = re.search(pat, message or "")
@@ -175,16 +187,17 @@ def run_chat(merchant, fields, history, message, forced=None):
     provider = get_provider()
     meter = Meter()
     fields = dict(fields or {})
+    message = (message or "")[:MAX_MESSAGE_CHARS]
     updates = extract_updates(message)
     fields.update(updates)  # 갱신된 베이스라인으로 답변 맥락 구성
 
     personas = route_chat(message, fields, forced, provider, meter)
 
-    # 대화이력 → contents(user/model)
+    # 대화이력 → contents(user/model). 최근 N개·글자수 절단(비용 방어)
     base_contents = []
-    for h in history or []:
+    for h in (history or [])[-MAX_HISTORY_MESSAGES:]:
         role = "user" if h.get("role") == "user" else "model"
-        base_contents.append({"role": role, "parts": [{"text": h.get("text", "")}]})
+        base_contents.append({"role": role, "parts": [{"text": (h.get("text") or "")[:MAX_MESSAGE_CHARS]}]})
     base_contents.append({"role": "user", "parts": [{"text": message}]})
 
     turns = []
@@ -201,7 +214,8 @@ def run_chat(merchant, fields, history, message, forced=None):
     return {
         "turns": turns,
         "updated_fields": updates,
-        "billing": {"provider": provider.name, "credits_charged": meter.credits(),
+        "billing": {"provider": provider.name,
+                    "credits_charged": 0 if provider.name == "stub" else meter.credits(),
                     "raw_cost_usd": round(meter.cost(), 6)},
     }
 

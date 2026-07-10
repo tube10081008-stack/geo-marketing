@@ -32,7 +32,8 @@ def run_geo(merchant, question: str = "") -> dict:
         "actions": actions,
         "billing": {
             "provider": provider.name,
-            "credits_charged": meter.credits(),
+            # Stub(데모)엔 크레딧 미청구(REVIEW §2)
+            "credits_charged": 0 if provider.name == "stub" else meter.credits(),
             "raw_cost_usd": round(meter.total_cost_usd(), 6),
             "calls": meter.breakdown(),
             "note": "계측=과금: 원가≤청구로 마진 보호(§7). provider=stub면 추정치.",
