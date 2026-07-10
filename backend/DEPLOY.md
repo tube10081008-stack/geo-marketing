@@ -28,8 +28,15 @@
 5. **Create Web Service** → 배포 완료 후 `https://<서비스>.onrender.com/api/v1/` 사용
 6. (선택) 관리자: Shell에서 `python manage.py createsuperuser`
 
-## 방법 B — Blueprint (render.yaml)
-루트 `render.yaml`에 아래 서비스를 추가하면 Apply 한 번으로 생성된다:
+## 방법 B — Blueprint (render.yaml) ✅ 반영 완료
+루트 `render.yaml`에 `geo-marketing-api` 서비스 + `geo-marketing-db`가 **이미 추가돼 있다.**
+- 이 저장소를 Blueprint로 이미 연결해뒀다면(도박 PoC 배포 시): Render 대시보드 → Blueprints → **Sync/Apply** 승인만 하면 생성된다.
+- 처음이라면: **New → Blueprint → 이 저장소 → 브랜치 `claude/wonderful-lovelace-54xws3` → Apply**.
+- Apply 후 대시보드에서 `GEMINI_API_KEY`만 직접 입력(`sync: false`라 프롬프트가 뜬다).
+- ⚠️ 무료 Postgres는 계정당 1개 — `urge-surfing-db`가 이미 있으면 `geo-marketing-db` 생성이 거부될 수 있다. 그 경우 옛 DB를 삭제하거나 유료 플랜 선택.
+- 헬스체크는 `/api/v1/health/`(무인증 200 — `/auth/me/`는 401이라 헬스체크에 부적합).
+
+참고용 원본 스니펫:
 ```yaml
   - type: web
     name: geo-marketing-api
@@ -39,7 +46,7 @@
     branch: claude/wonderful-lovelace-54xws3
     buildCommand: "pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate"
     startCommand: "gunicorn config.wsgi"
-    healthCheckPath: /api/v1/auth/me/
+    healthCheckPath: /api/v1/health/
     envVars:
       - key: DJANGO_SECRET_KEY
         generateValue: true

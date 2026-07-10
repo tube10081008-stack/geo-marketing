@@ -105,45 +105,61 @@ def get_provider():
 
 
 def build_card(merchant, fields):
+    """intake v1.1(REVIEW §5): 사장님이 아는 숫자만 받는다.
+    - 전환율·NPS 입력 제거(측정 불가/설문 필요) → 월 고객수·단골비중으로 대체
+    - 데이터 등급은 자가선택이 아니라 자동 판정: 값 입력=C(수기), 비움=D(추정)
+    - 객단가 미입력 시 월매출÷월고객수로 자동 계산
+    """
     def num(k):
         v = fields.get(k)
         try:
-            return float(v) if v not in (None, "") else None
+            return float(str(v).replace(",", "")) if v not in (None, "") else None
         except (TypeError, ValueError):
             return None
 
-    grades = [fields.get("acq_grade", "C"), fields.get("cvr_grade", "C"), fields.get("ret_grade", "C")]
-    worst = max(grades, key=["A", "B", "C", "D"].index)
+    revenue, customers = num("monthly_revenue"), num("monthly_customers")
+    aov = num("aov")
+    aov_src = "입력"
+    if aov is None and revenue and customers:
+        aov = round(revenue / customers)
+        aov_src = "자동계산(월매출÷월고객수)"
+
+    def grade(*vals):
+        return "C" if any(v is not None for v in vals) else "D"
+
+    g_acq = grade(num("avg_rating"), num("review_count"), num("place_clicks"))
+    g_cvr = grade(aov, customers)
+    g_ret = grade(num("revisit_rate"), num("regular_ratio"))
+    worst = max([g_acq, g_cvr, g_ret], key=["A", "B", "C", "D"].index)
     return {
         "merchant": merchant,
         "overall_data_grade": worst,
         "acquisition": {"avg_rating": num("avg_rating"), "review_count": num("review_count"),
-                        "monthly_traffic_proxy": num("place_clicks"), "grade": fields.get("acq_grade", "C")},
-        "conversion": {"aov_krw": num("aov"), "visit_to_purchase_rate_pct": num("visit_to_purchase_rate"),
-                       "grade": fields.get("cvr_grade", "C")},
-        "retention": {"revisit_rate_pct": num("revisit_rate"), "nps": num("nps"),
-                      "grade": fields.get("ret_grade", "C")},
+                        "monthly_traffic_proxy": num("place_clicks"), "grade": g_acq},
+        "conversion": {"aov_krw": aov, "aov_source": aov_src if aov is not None else None,
+                       "monthly_customers": customers, "grade": g_cvr},
+        "retention": {"revisit_rate_pct": num("revisit_rate"), "regular_ratio_pct": num("regular_ratio"),
+                      "grade": g_ret},
         "disclaimer": "투영치는 베이스라인 기반 추정이며 인과 보장이 아님(orchestrator §4.3).",
     }
 
 
 def route(card):
-    # ⚠️ 휴리스틱 v1(REVIEW): 임계값은 업종 벤치마크 없는 잠정치 — "개선 여지" 신호로만 사용
+    # ⚠️ 휴리스틱 v1.1(REVIEW): 임계값은 업종 벤치마크 없는 잠정치 — "개선 여지" 신호로만 사용
     acq, cvr, ret = card["acquisition"], card["conversion"], card["retention"]
     woke = {}
     r = acq.get("avg_rating")
     if r is None or r < 4.3:
-        woke["acq"] = f"평점·노출에 개선 여지(rating={r}) → 발견·리뷰 보강"
-    c = cvr.get("visit_to_purchase_rate_pct")
-    if c is None or c < 60:
-        woke["cvr"] = f"전환율에 개선 여지(conv={c}%) → 평점·오퍼 최적화"
+        woke["acq"] = f"평점·노출에 개선 여지(평점 {r if r is not None else '미상'}) → 발견·리뷰 보강"
+    if cvr.get("aov_krw") is None:
+        woke["cvr"] = "객단가·고객수 데이터 미비 → 오퍼 설계 전 측정 체계부터"
     elif r is None or r < 4.3:
-        woke.setdefault("cvr", "평점이 전환에 직결 → 함께 점검")
-    rv, n = ret.get("revisit_rate_pct"), ret.get("nps")
-    if rv is None or rv < 35 or (n is not None and n < 30):
-        woke["ret"] = f"재방문·NPS에 개선 여지(revisit={rv}%, nps={n}) → 리텐션"
+        woke["cvr"] = "평점이 구매결정에 직결[M12·M14] → 오퍼·가격과 함께 점검"
+    rv, rr = ret.get("revisit_rate_pct"), ret.get("regular_ratio_pct")
+    if (rv is None and rr is None) or (rv is not None and rv < 35) or (rr is not None and rr < 30):
+        woke["ret"] = f"재방문·단골에 개선 여지(재방문 {rv if rv is not None else '미상'}%, 단골 {rr if rr is not None else '미상'}%) → 리텐션"
     if not woke:
-        woke["cvr"] = "뚜렷한 개선 신호 없음 → 전환 미세최적화로 quick-win"
+        woke["cvr"] = "뚜렷한 개선 신호 없음 → 오퍼 미세최적화로 quick-win"
     return woke
 
 
@@ -155,16 +171,21 @@ def _draft(persona, card):
                 f"목표: 평점 {r}→{round(r+0.2,1)}, 리뷰수 +20%(4주). "
                 f"근거: 평점↑→매출↑(美 독립식당 5~9%, 방향성)[M11], 리뷰수가 노출순위 좌우(국내)[M15], 신규도달=성장[M1]."), ["M11", "M15", "M1"]
     if persona == "cvr":
-        c = cvr.get("visit_to_purchase_rate_pct") or 55
-        a = cvr.get("aov_krw") or 0
-        return (f"평점 0.1~0.2 상향 + '오늘만' 손실프레임 오퍼 A/B + 가격 끝자리 9. "
-                f"목표: 전환율 {c}%→{round(c+3,1)}%, 객단가 {int(a)}원 유지. "
+        a = cvr.get("aov_krw")
+        if a is None:
+            return ("먼저 측정 체계: 4주간 일일 고객수·매출 기록(포스/수기)으로 객단가 베이스라인 확보. "
+                    "그 위에서 '오늘만' 손실프레임 오퍼 A/B + 가격 끝자리 9 실험을 설계. "
+                    "근거: 반별점↑→예약매진 +19%p(美)[M12], 9-끝자리 수요↑(세일 병용 시 약화)[M5], 손실회피(A/B 검증 전제)[M4]."), ["M12", "M5", "M4"]
+        return (f"'오늘만' 손실프레임 오퍼 A/B + 가격 끝자리 9 실험(현 객단가 {int(a)}원 기준). "
+                f"목표: 4주 객단가 +3~5% 또는 세트메뉴 구성비 상승 — 매출·객수 주간 기록으로 판정. "
                 f"근거: 반별점↑→예약매진 +19%p(美)[M12], 9-끝자리 수요↑(세일 병용 시 약화)[M5], 손실회피(A/B 검증 전제)[M4]."), ["M12", "M5", "M4"]
-    rv = ret.get("revisit_rate_pct") or 30
-    n = ret.get("nps") or 30
-    return (f"RFM 단골 세분화→이탈임박 세그먼트 재방문 쿠폰(수익성 세그먼트 우선[M10]) + 부정리뷰 24h 응대룰. "
-            f"목표: 재방문율 {rv}%→{round(rv+5,1)}%, NPS {int(n)}→{int(n)+5}(보조지표). "
-            f"근거: 이탈↓→이익↑(산업별 사례)[M7], RFM·CLV[M8], 부정리뷰 신속대응[M13], NPS는 보조지표[M16]."), ["M7", "M8", "M13", "M10", "M16"]
+    rv = ret.get("revisit_rate_pct")
+    rr = ret.get("regular_ratio_pct")
+    rv_t = f"재방문율 {rv}%→{round(rv+5,1)}%" if rv is not None else "재방문율 측정 시작(멤버십/스탬프)"
+    rr_t = f", 단골비중 {rr}%→{round(rr+5,1)}%" if rr is not None else ""
+    return (f"단골 식별(스탬프/멤버십)→이탈임박 고객 재방문 쿠폰(수익성 세그먼트 우선[M10]) + 부정리뷰 24h 응대룰. "
+            f"목표: {rv_t}{rr_t}. "
+            f"근거: 이탈↓→이익↑(산업별 사례)[M7], RFM·CLV[M8], 부정리뷰 신속대응[M13]."), ["M7", "M8", "M13", "M10", "M16"]
 
 
 def advise(persona, card, provider, meter):
@@ -201,6 +222,7 @@ def run_geo(merchant, fields, question=""):
     return {
         "merchant": card["merchant"],
         "overall_data_grade": card["overall_data_grade"],
+        "baseline": {k: card[k] for k in ("acquisition", "conversion", "retention")},
         "routing": {"woke_personas": list(reasons), "reasons": reasons,
                     "router": provider.router_model if question and provider.name != "stub" else "rule-based(무료)"},
         "actions": actions,

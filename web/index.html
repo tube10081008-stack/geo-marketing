@@ -247,7 +247,7 @@
 <div class="overlay" id="modal" hidden>
   <div class="modal">
     <div class="modal-head">
-      <div><h2>기초자료 수집</h2><p>가게의 숫자를 입력하면 KPI·맞춤 액션이 생성됩니다.</p></div>
+      <div><h2>기초자료 수집</h2><p><b>아는 것만</b> 입력하세요 — 비운 항목은 추정(등급 D)으로 처리하고, 대화 중에 언제든 채울 수 있습니다.</p></div>
       <button class="x" id="closeData" aria-label="닫기">✕</button>
     </div>
     <form id="f">
@@ -271,35 +271,28 @@
       <div class="grp">
         <h3><i style="background:var(--acq)"></i>획득 — 노출·리뷰</h3>
         <div class="row2">
-          <div class="field"><label>플레이스 클릭(월)</label><input name="place_clicks" inputmode="numeric" placeholder="1500" /></div>
+          <div class="field"><label>네이버 플레이스 방문·클릭(월)</label><input name="place_clicks" inputmode="numeric" placeholder="스마트플레이스 통계에서 확인" /></div>
           <div class="field"><label>리뷰 개수</label><input name="review_count" inputmode="numeric" placeholder="120" /></div>
         </div>
+        <div class="field" style="max-width:calc(50% - 6px)"><label>평균 평점 (0~5)</label><input name="avg_rating" inputmode="decimal" placeholder="4.1" /></div>
+      </div>
+      <div class="grp">
+        <h3><i style="background:var(--cvr)"></i>전환 — 고객수·객단가</h3>
         <div class="row2">
-          <div class="field"><label>평균 평점 (0~5)</label><input name="avg_rating" inputmode="decimal" placeholder="4.1" /></div>
-          <div class="field"><label>데이터 등급</label>
-            <select name="acq_grade"><option>A</option><option>B</option><option selected>C</option><option>D</option></select></div>
+          <div class="field"><label>월 고객수(명)</label><input name="monthly_customers" inputmode="numeric" placeholder="1100" /></div>
+          <div class="field"><label>객단가(원) <span style="color:var(--faint)">— 비우면 매출÷고객수로 자동 계산</span></label><input name="aov" inputmode="numeric" placeholder="28000" /></div>
         </div>
       </div>
       <div class="grp">
-        <h3><i style="background:var(--cvr)"></i>전환 — 객단가·전환율</h3>
+        <h3><i style="background:var(--ret)"></i>유지 — 재방문·단골</h3>
         <div class="row2">
-          <div class="field"><label>객단가 AOV(원)</label><input name="aov" inputmode="numeric" placeholder="28000" /></div>
-          <div class="field"><label>전환율(%)</label><input name="visit_to_purchase_rate" inputmode="decimal" placeholder="55" /></div>
+          <div class="field"><label>재방문율(%) <span style="color:var(--faint)">— 모르면 비워두세요</span></label><input name="revisit_rate" inputmode="decimal" placeholder="30" /></div>
+          <div class="field"><label>단골 비중 체감(%)</label><input name="regular_ratio" inputmode="decimal" placeholder="20" /></div>
         </div>
-        <div class="field"><label>데이터 등급</label>
-          <select name="cvr_grade"><option>A</option><option selected>B</option><option>C</option><option>D</option></select></div>
-      </div>
-      <div class="grp">
-        <h3><i style="background:var(--ret)"></i>유지 — 재방문·NPS</h3>
-        <div class="row2">
-          <div class="field"><label>재방문율(%)</label><input name="revisit_rate" inputmode="decimal" placeholder="30" /></div>
-          <div class="field"><label>NPS (-100~100)</label><input name="nps" inputmode="numeric" placeholder="22" /></div>
-        </div>
-        <div class="field"><label>데이터 등급</label>
-          <select name="ret_grade"><option>A</option><option>B</option><option>C</option><option selected>D</option></select></div>
         <div class="field"><label>지오에게 한마디 (선택)</label><input name="question" placeholder="예: 신규 손님을 더 끌고 싶어요" /></div>
         <label class="consent"><input type="checkbox" id="consent" />
-          고객데이터 위탁처리 동의 — RFM 분석 전제(개인정보 게이트)</label>
+          입력한 가게 정보를 분석 목적으로 처리하는 데 동의합니다
+        </label>
       </div>
       <button class="btn" id="go" type="submit" style="margin-top:16px">저장하고 분석</button>
     </form>
@@ -314,8 +307,9 @@ const PERSONA = {
 };
 const GRADE_COLOR = {A:'#008300', B:'#65A30D', C:'#D97706', D:'#e34948'};
 const FIELD_LABELS = {avg_rating:'평점', review_count:'리뷰수', place_clicks:'플레이스클릭',
-  aov:'객단가', visit_to_purchase_rate:'전환율', revisit_rate:'재방문율', nps:'NPS'};
-const SKEY = 'geo_session_v3';
+  aov:'객단가', monthly_customers:'월 고객수', revisit_rate:'재방문율', regular_ratio:'단골비중',
+  visit_to_purchase_rate:'전환율', nps:'NPS'};
+const SKEY = 'geo_session_v4';
 
 const $ = s => document.querySelector(s);
 const f = $('#f'), go = $('#go'), modal = $('#modal');
@@ -353,8 +347,8 @@ f.addEventListener('submit', async (e) => {
   const merchant = fd.get('merchant') || '내 가게';
   const question = fd.get('question') || '';
   const fields = {};
-  ['place_clicks','review_count','avg_rating','aov','visit_to_purchase_rate',
-   'revisit_rate','nps','acq_grade','cvr_grade','ret_grade'].forEach(k => fields[k] = fd.get(k));
+  ['place_clicks','review_count','avg_rating','monthly_revenue','monthly_customers',
+   'aov','revisit_rate','regular_ratio'].forEach(k => fields[k] = fd.get(k));
   window._ctx = { merchant, fields };
 
   go.disabled = true; go.textContent = '분석 중…';
@@ -380,6 +374,9 @@ f.addEventListener('submit', async (e) => {
 /* ── 대시보드 렌더 ── */
 function applyAdvice(d) {
   window._advice = d;
+  // 서버 자동계산(객단가=매출÷고객수)을 KPI에 반영
+  const bAov = d.baseline && d.baseline.conversion && d.baseline.conversion.aov_krw;
+  if (bAov != null && window._ctx && !window._ctx.fields.aov) window._ctx.fields.aov = String(bAov);
   $('#emptyBanner').hidden = true;
   $('#pageTitle').textContent = d.merchant;
   $('#wsName').textContent = d.merchant;
@@ -409,15 +406,15 @@ function applyAdvice(d) {
 
 function renderKpis() {
   const x = (window._ctx && window._ctx.fields) || {};
-  const has = Object.entries(x).some(([k,v]) => v !== '' && v != null && !k.endsWith('_grade'));
+  const has = Object.values(x).some(v => v !== '' && v != null);
   if (!has) { $('#kpis').hidden = true; return; }
   const tiles = [
     ['avg_rating','평점','/5','acq'], ['review_count','리뷰수','개','acq'],
-    ['visit_to_purchase_rate','전환율','%','cvr'], ['aov','객단가','원','cvr'],
-    ['revisit_rate','재방문율','%','ret'], ['nps','NPS','','ret'],
+    ['monthly_customers','월 고객수','명','cvr'], ['aov','객단가','원','cvr'],
+    ['revisit_rate','재방문율','%','ret'], ['regular_ratio','단골비중','%','ret'],
   ];
   $('#kpis').innerHTML = tiles.map(([k,label,unit,p]) => {
-    const v = x[k]; const disp = (k==='aov') ? fmt(v) : (v==null||v===''?'—':v);
+    const v = x[k]; const disp = (k==='aov'||k==='monthly_customers') ? fmt(v) : (v==null||v===''?'—':v);
     return `<div class="kpi">
       <div class="lab"><i style="background:${PERSONA[p].color}"></i>${label}</div>
       <div class="val">${disp}<small>${unit}</small></div></div>`;

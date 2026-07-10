@@ -110,8 +110,8 @@ def _card_summary(fields):
         v = fields.get(k)
         return v if v not in (None, "") else "?"
     return (f"평점 {g('avg_rating')}, 리뷰 {g('review_count')}, 플레이스클릭 {g('place_clicks')}, "
-            f"객단가 {g('aov')}, 전환율 {g('visit_to_purchase_rate')}%, "
-            f"재방문 {g('revisit_rate')}%, NPS {g('nps')}")
+            f"객단가 {g('aov')}, 월고객수 {g('monthly_customers')}, "
+            f"재방문 {g('revisit_rate')}%, 단골비중 {g('regular_ratio')}%")
 
 
 def route_chat(message, fields, forced, provider, meter):
@@ -147,6 +147,8 @@ _PATTERNS = {
     "aov": r"객단가\s*(?:은|는|이|:)?\s*([\d,]{4,})",
     "nps": r"(?i)nps\s*(?:은|는|이|:)?\s*(-?\d{1,3})",
     "place_clicks": r"클릭\s*(?:은|는|이|:)?\s*(\d{2,7})",
+    "regular_ratio": r"단골\s*(?:비중|비율)?\s*(?:은|이|:)?\s*(\d{1,3})\s*%?",
+    "monthly_customers": r"(?:월\s*)?고객\s*(?:수)?\s*(?:는|은|가|:)?\s*([\d,]{2,7})\s*명",
 }
 
 
