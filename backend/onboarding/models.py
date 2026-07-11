@@ -339,3 +339,40 @@ class ChatMessage(models.Model):
 
     def __str__(self):
         return f"{self.merchant.name} · {self.role}: {self.text[:24]}"
+
+
+class DeepReport(models.Model):
+    """P2.5 지오 딥리포트 — Marlin-lite (RESEARCH-treequest-marlin.md §2).
+
+    월간 초맞춤 리포트 잡(비동기). 원가 목표: 라이트 ~$0.05 / 딥 ~$0.15.
+    """
+
+    class Tier(models.TextChoices):
+        LITE = "lite", "라이트(플레인 파이프라인)"
+        DEEP = "deep", "딥(핵심 섹션 AB-MCTS 탐색)"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "대기"
+        RUNNING = "running", "생성 중"
+        DONE = "done", "완료"
+        FAILED = "failed", "실패"
+
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.CASCADE, related_name="reports", verbose_name="업체",
+    )
+    tier = models.CharField("티어", max_length=8, choices=Tier.choices, default=Tier.LITE)
+    status = models.CharField("상태", max_length=8, choices=Status.choices, default=Status.PENDING)
+    content_md = models.TextField("리포트(Markdown)", blank=True, default="")
+    meta = models.JSONField("메타(호출·비용·탐색로그)", default=dict, blank=True)
+    credits_charged = models.PositiveIntegerField("청구 크레딧", default=0)
+    error = models.TextField("오류", blank=True, default="")
+    created_at = models.DateTimeField("요청", auto_now_add=True)
+    finished_at = models.DateTimeField("완료", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "딥리포트"
+        verbose_name_plural = "딥리포트"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.merchant.name} · {self.tier} · {self.status}"
