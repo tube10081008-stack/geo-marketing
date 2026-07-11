@@ -80,6 +80,15 @@ class Merchant(models.Model):
         "고객데이터 위탁처리 동의", default=False,
         help_text="intake §4 개인정보 게이트. 미동의 시 거래로그 수집 불가.",
     )
+    chat_summary = models.TextField(
+        "대화 장기기억 요약", blank=True, default="",
+        help_text="최근 창 밖의 과거 대화를 저가 모델로 압축한 롤링 요약 — "
+                  "전체 이력을 매번 보내지 않고도 다음 대화가 과거를 참조.",
+    )
+    chat_summary_upto = models.PositiveIntegerField(
+        "요약 반영된 마지막 메시지 ID", default=0,
+        help_text="이 ID 이하의 메시지는 chat_summary에 병합 완료.",
+    )
     created_at = models.DateTimeField("생성", auto_now_add=True)
     updated_at = models.DateTimeField("수정", auto_now=True)
 

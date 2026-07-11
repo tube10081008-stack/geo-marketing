@@ -24,6 +24,8 @@ PRICING = {
     "stub": (3.0, 15.0),
 }
 CREDIT_COST_USD = float(os.environ.get("GEO_CREDIT_COST_USD", "0.01"))
+# 대화 응답 상한 — 600은 협업 턴에서 문장이 중간에 끊기는 원인이었다(버그 수정).
+CHAT_MAX_TOKENS = int(os.environ.get("GEO_CHAT_MAX_TOKENS", "1024"))
 
 
 @dataclass
@@ -74,7 +76,7 @@ class StubProvider:
         in_tok = (len(system) + len(prompt)) // 4
         return prompt, Usage(model=model, input_tokens=in_tok, output_tokens=max(40, len(prompt) // 8))
 
-    def chat(self, *, system, messages, max_tokens=600):
+    def chat(self, *, system, messages, max_tokens=CHAT_MAX_TOKENS):
         last = (messages or [{}])[-1].get("text", "")
         text = (f"(데모/Stub 응답) '{last}'에 대해 베이스라인과 코퍼스를 근거로, "
                 "시스템 지침의 [M#] 근거에 따라 측정가능한 1~2개 실행안을 권합니다. "
@@ -108,7 +110,7 @@ class GeminiProvider:
     def complete(self, *, model, system, prompt, max_tokens=800):
         return self._post(model, system, [{"role": "user", "parts": [{"text": prompt}]}], max_tokens)
 
-    def chat(self, *, system, messages, max_tokens=600):
+    def chat(self, *, system, messages, max_tokens=CHAT_MAX_TOKENS):
         return self._post(self.generator_model, system, _to_contents(messages), max_tokens)
 
 
@@ -127,7 +129,7 @@ class AnthropicProvider:
             messages=[{"role": "user", "content": prompt}])
         return self._text(resp)
 
-    def chat(self, *, system, messages, max_tokens=600):
+    def chat(self, *, system, messages, max_tokens=CHAT_MAX_TOKENS):
         conv = [{"role": "user" if m.get("role") == "user" else "assistant",
                  "content": m.get("text", "")} for m in messages or []]
         resp = self._client().messages.create(

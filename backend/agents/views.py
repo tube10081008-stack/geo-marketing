@@ -1,9 +1,12 @@
 """
-에이전트 API — 계정 보호 + 대화 영속.
+에이전트 API — 계정 보호 + 대화 영속 + 포인트 과금(젠스파크식).
 
 - AdviseView : 베이스라인 → 1회 종합 액션 (자기 업체만)
 - ChatView   : 세 에이전트와 대화. 사용자/에이전트 메시지를 DB에 저장(세션 지속).
 - HistoryView: 업체 대화 이력 조회(새 기기/재접속에도 복원).
+
+과금: '대화당 1크레딧'이 아니라 호출별 실사용 토큰 원가를 포인트로 환산해
+Wallet에서 차감(accounts.models.charge). Stub(데모)은 무과금, 잔액 0 이하는 402.
 """
 import threading
 
@@ -12,11 +15,34 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import charge, get_wallet
 from onboarding.models import ChatMessage, DeepReport, Merchant
 
-from .chat import run_chat
+from .chat import MAX_HISTORY_MESSAGES, maybe_compact, run_chat
 from .deepreport import run_report
+from .llm import Meter, get_provider
 from .orchestrator import run_geo
+
+
+def _billing_gate(user, provider):
+    """잔액 0 이하 + 실과금 프로바이더면 402 응답을, 아니면 None을 돌려준다."""
+    if provider.name != "stub" and get_wallet(user).balance <= 0:
+        return Response(
+            {"detail": "포인트가 모두 소진되었습니다. 충전 후 이용해 주세요.",
+             "balance": get_wallet(user).balance},
+            status=402)
+    return None
+
+
+def _charge(user, provider, meter):
+    """실사용 원가를 포인트로 차감. 반환: billing dict 조각."""
+    cost = meter.total_cost_usd()
+    if provider.name == "stub":
+        return {"points_charged": 0, "balance": get_wallet(user).balance,
+                "raw_cost_usd": round(cost, 6), "note": "데모(stub)는 무과금"}
+    points, balance = charge(user, cost)
+    return {"points_charged": points, "balance": balance,
+            "raw_cost_usd": round(cost, 6)}
 
 
 def _merchant(request, merchant_id):
@@ -55,7 +81,15 @@ class AdviseView(APIView):
 
     def post(self, request):
         merchant = _merchant(request, request.data.get("merchant_id"))
-        return Response(run_geo(merchant, request.data.get("question", "")))
+        provider = get_provider()
+        gate = _billing_gate(request.user, provider)
+        if gate:
+            return gate
+        meter = Meter()
+        result = run_geo(merchant, request.data.get("question", ""),
+                         provider=provider, meter=meter)
+        result["billing"].update(_charge(request.user, provider, meter))
+        return Response(result)
 
 
 class ChatView(APIView):
@@ -68,12 +102,19 @@ class ChatView(APIView):
         if not message:
             return Response({"detail": "메시지가 비어 있습니다."}, status=400)
 
-        # 저장된 이력을 LLM 맥락으로(시스템 메시지는 제외)
-        history = [
-            {"role": m.role, "text": m.text}
-            for m in merchant.messages.exclude(role=ChatMessage.Role.SYSTEM)
-        ]
-        result = run_chat(merchant, history, message, forced)
+        provider = get_provider()
+        gate = _billing_gate(request.user, provider)
+        if gate:
+            return gate
+        meter = Meter()
+
+        # 최근 창만 원문으로 로드(그 이전은 merchant.chat_summary가 대신한다)
+        recent = list(
+            merchant.messages.exclude(role=ChatMessage.Role.SYSTEM)
+            .order_by("-pk")[:MAX_HISTORY_MESSAGES])[::-1]
+        history = [{"role": m.role, "text": m.text} for m in recent]
+        result = run_chat(merchant, history, message, forced,
+                          provider=provider, meter=meter)
 
         # 영속: 사용자 메시지 + (갱신 시)베이스라인 DB 반영 + 시스템 + 에이전트 답변들
         ChatMessage.objects.create(merchant=merchant, role="user", text=message)
@@ -87,6 +128,11 @@ class ChatView(APIView):
         for t in result["turns"]:
             ChatMessage.objects.create(
                 merchant=merchant, role="agent", persona=t["persona"], text=t["reply"])
+
+        # 장기기억 컴팩션(필요 시 저가 모델 1콜) → 그 비용까지 합산해 포인트 차감
+        compacted = maybe_compact(merchant, provider, meter)
+        result["billing"].update(_charge(request.user, provider, meter))
+        result["billing"]["memory_compacted"] = compacted
 
         return Response(result)
 
@@ -108,7 +154,7 @@ def _report_payload(r: DeepReport) -> dict:
     return {
         "id": r.pk, "tier": r.tier, "status": r.status,
         "content_md": r.content_md if r.status == DeepReport.Status.DONE else "",
-        "credits_charged": r.credits_charged, "meta": r.meta, "error": r.error,
+        "points_charged": r.credits_charged, "meta": r.meta, "error": r.error,
         "created_at": r.created_at.isoformat(),
         "finished_at": r.finished_at.isoformat() if r.finished_at else None,
     }
@@ -121,6 +167,9 @@ class ReportView(APIView):
 
     def post(self, request):
         merchant = _merchant(request, request.data.get("merchant_id"))
+        gate = _billing_gate(request.user, get_provider())
+        if gate:
+            return gate
         tier = request.data.get("tier", DeepReport.Tier.LITE)
         if tier not in DeepReport.Tier.values:
             return Response({"detail": "tier는 lite|deep"}, status=400)

@@ -1,9 +1,13 @@
 """
 Django 대화 엔진 — 세 에이전트와 멀티턴 대화(라우팅·협업·베이스라인 추출).
 
-merchant.baseline_card()를 맥락으로, 지오가 메시지를 적합 페르소나로 라우팅(여러
-영역이면 협업 2인), 각 페르소나가 대화이력 + [M#] 코퍼스로 답하고 핸드오프 안내.
-영속(ChatMessage 저장)은 뷰가 담당.
+merchant.baseline_card()를 맥락으로, 복어(Fugu)가 메시지를 적합 페르소나로
+라우팅(여러 영역이면 협업 2인), 각 페르소나가 [장기기억 요약 + 최근 대화창 +
+[M#] 코퍼스]로 답하고 핸드오프 안내. 영속(ChatMessage 저장)은 뷰가 담당.
+
+장기기억(요약 컴팩션): 최근 MAX_HISTORY_MESSAGES개만 원문으로 보내고, 그보다
+오래된 대화는 저가 라우터 모델로 병합 요약(maybe_compact)해 Merchant.chat_summary
+에 영속 → 전체 이력이 DB에 남으면서도 토큰 소모는 상수로 유지된다.
 """
 import re
 
@@ -41,6 +45,9 @@ _INTENT_RE = re.compile(r"싶|려면|할까|목표|어떻게|되고 싶")
 # 비용·공격 방어(REVIEW §2): 서버가 신뢰 경계 — 프런트가 보낸 값은 절단한다
 MAX_MESSAGE_CHARS = 1000
 MAX_HISTORY_MESSAGES = 12
+# 최근 창 밖의 미요약 메시지가 이만큼 쌓이면 장기기억으로 병합(저가 모델 1콜)
+COMPACT_TRIGGER = 8
+SUMMARY_MAX_CHARS = 800
 
 
 def extract_updates(message):
@@ -81,26 +88,29 @@ def _label(persona):
     return f"{meta['emoji']} {meta['name']}", meta["kpi"]
 
 
-def _system(persona, merchant_name, card, collab=None):
+def _system(persona, merchant_name, card, collab=None, summary=""):
     label, kpi = _label(persona)
     cites = "\n".join(f"- [{e.mid}] {e.claim} ({e.cite})" for e in retrieve(persona))
     others = ", ".join(f"{PERSONA_META[p]['emoji']} {PERSONA_META[p]['name']}"
                        for p in ("acq", "cvr", "ret") if p != persona)
     base = (f"너는 소상공인 '{merchant_name}'의 마케팅 {label} 담당 에이전트다. 담당 KPI: {kpi}.\n"
+            f"오케스트레이터는 🐡 복어(Fugu)이며 너는 복어가 이끄는 획득·전환·유지 3인 팀의 일원이다.\n"
             f"베이스라인: {_card_summary(card)}.\n"
             f"근거 코퍼스(관련 시 반드시 [M#] 인용):\n{cites}\n"
-            f"너는 획득·전환·유지 3인 팀의 일원이다. 네 영역 밖이면 {others} 에이전트에게 넘기라고 안내하라.\n"
+            f"네 영역 밖이면 {others} 에이전트에게 넘기라고 안내하라.\n"
             "사장님과 대화하듯 간결하고 실행가능하게 답하라. 2~4문장. 출처를 댈 수 없는 단정은 금지.")
+    if summary:
+        base += f"\n\n[장기기억 — 이전 대화 요약]\n{summary[:SUMMARY_MAX_CHARS]}"
     if collab:
         base += (f"\n\n[협업] 동료 에이전트가 먼저 답했다:\n\"{collab}\"\n"
                  "중복은 피하고 네 전문영역 관점에서 보완·연결하라(시너지 한 줄).")
     return base
 
 
-def run_chat(merchant, history, message, forced=None):
+def run_chat(merchant, history, message, forced=None, provider=None, meter=None):
     card = merchant.baseline_card()
-    provider = get_provider()
-    meter = Meter()
+    provider = provider or get_provider()
+    meter = meter if meter is not None else Meter()
     message = (message or "")[:MAX_MESSAGE_CHARS]
     personas = route(message, forced, provider, meter)
 
@@ -112,18 +122,55 @@ def run_chat(merchant, history, message, forced=None):
     turns, collab = [], None
     for p in personas:
         label, kpi = _label(p)
-        system = _system(p, merchant.name, card, collab)
+        system = _system(p, merchant.name, card, collab, summary=merchant.chat_summary)
         reply, usage = provider.chat(system=system, messages=messages)
         meter.add(usage)
         turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,
                       "citations": [e.mid for e in retrieve(p)]})
         collab = f"{label}: {reply}"
 
-    # Stub(데모)엔 크레딧을 청구하지 않는다(REVIEW §2 — 정직한 과금)
-    credits = 0 if provider.name == "stub" else meter.credits()
     return {
         "turns": turns,
         "updated_fields": extract_updates(message),
-        "billing": {"provider": provider.name, "credits_charged": credits,
+        # 과금(포인트 차감·잔액)은 뷰가 Wallet과 함께 채운다
+        "billing": {"provider": provider.name,
                     "raw_cost_usd": round(meter.total_cost_usd(), 6)},
     }
+
+
+def maybe_compact(merchant, provider, meter):
+    """최근 창 밖에 미요약 메시지가 COMPACT_TRIGGER개 이상 쌓이면 장기기억으로 병합.
+
+    전체 원문은 ChatMessage(DB)에 영구 보존되고, LLM에는 [요약 + 최근 창]만
+    전달된다 — 대화가 아무리 길어져도 턴당 토큰 소모가 상수로 유지된다.
+    반환: 요약 갱신 여부.
+    """
+    from onboarding.models import ChatMessage
+
+    qs = merchant.messages.exclude(role=ChatMessage.Role.SYSTEM).order_by("-pk")
+    recent_ids = list(qs.values_list("pk", flat=True)[:MAX_HISTORY_MESSAGES])
+    cutoff = min(recent_ids) if recent_ids else 0
+    stale = list(
+        qs.filter(pk__gt=merchant.chat_summary_upto, pk__lt=cutoff).order_by("pk"))
+    if len(stale) < COMPACT_TRIGGER:
+        return False
+
+    lines = "\n".join(f"{m.role}: {m.text[:300]}" for m in stale)
+    prev = merchant.chat_summary or "(없음)"
+    if provider.name == "stub":
+        # 무키 환경 — 결정적 컴팩션(원문 앞부분 유지)으로 파이프라인만 검증
+        summary = (merchant.chat_summary + " | " + lines.replace("\n", " / "))[-SUMMARY_MAX_CHARS:]
+    else:
+        text, usage = provider.complete(
+            model=provider.router_model,
+            system=("소상공인 대화 장기기억 요약기. 기존 요약과 새 대화를 병합해 "
+                    "가게 사실·지표 수치·목표·진행 중 실행안·사장님 선호만 남기고 "
+                    f"{SUMMARY_MAX_CHARS}자 이내 한국어 개조식으로 요약하라."),
+            prompt=f"[기존 요약]\n{prev}\n\n[새 대화]\n{lines}",
+            max_tokens=500)
+        meter.add(usage)
+        summary = (text or prev)[:SUMMARY_MAX_CHARS]
+    merchant.chat_summary = summary
+    merchant.chat_summary_upto = stale[-1].pk
+    merchant.save(update_fields=["chat_summary", "chat_summary_upto"])
+    return True

@@ -202,7 +202,7 @@
     <div class="status">
       <div class="stat-line"><span>계정</span><b id="acctName">게스트(브라우저 저장)</b></div>
       <div class="stat-line"><span><i class="eng-dot" id="engDot"></i>엔진</span><b id="engName">대기</b></div>
-      <div class="stat-line"><span>사용 크레딧</span><b id="credN">0</b></div>
+      <div class="stat-line"><span>🐡 포인트</span><b id="balN">데모(무과금)</b></div>
       <button class="btn" id="openData">데이터 입력</button>
       <button class="btn ghost" id="reportBtn" hidden>📄 딥리포트</button>
       <button class="btn ghost" id="authBtn">로그인 / 가입</button>
@@ -242,7 +242,7 @@
             <div class="tab" data-p="cvr">전환</div>
             <div class="tab" data-p="ret">유지</div>
           </div>
-          <span class="microlabel">Geo routes to the right specialist</span>
+          <span class="microlabel">Fugu routes to the right specialist</span>
         </div>
         <div class="msgs" id="msgs"></div>
         <div class="composer">
@@ -255,7 +255,7 @@
     <section class="sec" id="actSec" hidden>
       <div class="sec-head" id="actions"><h2>실행 액션</h2><span class="hint">근거 인용 [M#] · 측정 목표 포함</span></div>
       <div class="acts" id="actGrid"></div>
-      <div class="footnote">근거 수치는 원 연구의 맥락(주로 해외 데이터) 기준의 방향성 지침입니다. 실제 효과는 이 가게의 실측 A/B로 검증하며, 데모(stub) 응답에는 크레딧이 청구되지 않습니다.</div>
+      <div class="footnote">근거 수치는 원 연구의 맥락(주로 해외 데이터) 기준의 방향성 지침입니다. 실제 효과는 이 가게의 실측 A/B로 검증하며, 데모(stub) 응답에는 포인트가 차감되지 않습니다.</div>
     </section>
   </main>
 </div>
@@ -270,7 +270,7 @@
     <form id="f">
       <div class="grp">
         <h3><i style="background:var(--ink)"></i>가게 정보</h3>
-        <div class="field"><label>상호</label><input name="merchant" placeholder="예: 지오네 고깃집" /></div>
+        <div class="field"><label>상호</label><input name="merchant" placeholder="예: 복어네 고깃집" /></div>
         <div class="row2">
           <div class="field"><label>업종</label>
             <select name="industry">
@@ -306,7 +306,7 @@
           <div class="field"><label>재방문율(%) <span style="color:var(--faint)">— 모르면 비워두세요</span></label><input name="revisit_rate" inputmode="decimal" placeholder="30" /></div>
           <div class="field"><label>단골 비중 체감(%)</label><input name="regular_ratio" inputmode="decimal" placeholder="20" /></div>
         </div>
-        <div class="field"><label>지오에게 한마디 (선택)</label><input name="question" placeholder="예: 신규 손님을 더 끌고 싶어요" /></div>
+        <div class="field"><label>복어(Fugu)에게 한마디 (선택)</label><input name="question" placeholder="예: 신규 손님을 더 끌고 싶어요" /></div>
         <label class="consent"><input type="checkbox" id="consent" />
           입력한 가게 정보를 분석 목적으로 처리하는 데 동의합니다
         </label>
@@ -320,7 +320,7 @@
 <div class="overlay" id="authModal" hidden>
   <div class="modal" style="max-width:400px">
     <div class="modal-head">
-      <div><h2>로그인 / 가입</h2><p>계정을 만들면 어느 기기에서든 가게 데이터·대화가 이어집니다.</p></div>
+      <div><h2>로그인 / 가입</h2><p>계정을 만들면 어느 기기에서든 가게 데이터·대화가 이어지고, 가입 시 무료 10,000P를 드려요(실사용 토큰만큼 차감).</p></div>
       <button class="x" id="closeAuth" aria-label="닫기">✕</button>
     </div>
     <div style="padding:6px 22px 22px">
@@ -341,7 +341,7 @@
 <div class="overlay" id="repModal" hidden>
   <div class="modal" style="max-width:720px">
     <div class="modal-head">
-      <div><h2>📄 지오 딥리포트</h2><p>가게 맞춤 월간 리포트 — 딥 티어는 핵심 섹션을 AB-MCTS로 탐색합니다.</p></div>
+      <div><h2>🐡 Fugu 딥리포트</h2><p>가게 맞춤 월간 리포트 — 딥 티어는 핵심 섹션을 AB-MCTS로 탐색합니다.</p></div>
       <button class="x" id="closeRep" aria-label="닫기">✕</button>
     </div>
     <div style="padding:6px 22px 22px">
@@ -397,7 +397,7 @@ async function api(path, opts={}){
 }
 const f = $('#f'), go = $('#go'), modal = $('#modal');
 const msgs = $('#msgs'), msgInput = $('#msg'), sendBtn = $('#send'), tabs = $('#tabs');
-let persona = '', history = [], credits = 0;
+let persona = '', history = [];
 
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const fmt = v => (v == null || v === '') ? '—' : String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -473,7 +473,7 @@ f.addEventListener('submit', async (e) => {
       d = await res.json();
       if (d.error) throw new Error(d.error);
     }
-    credits += d.billing.credits_charged || 0;
+    applyBilling(d.billing);
     applyAdvice(d);
     closeModal();
     sysBubble(auth ? '서버에 저장 완료 — 어느 기기에서든 이어집니다. 궁금한 걸 물어보세요.'
@@ -500,7 +500,6 @@ function applyAdvice(d) {
            p.style.background = GRADE_COLOR[g] || '#9AA3B5'; }
   $('#wsSub').textContent = '베이스라인 등록됨 · 등급이 낮을수록 추정 비중이 큽니다';
   setEngine(d.billing.provider);
-  setCredits();
   renderKpis();
 
   $('#reasons').innerHTML = Object.entries(d.routing.reasons).map(([p, r]) =>
@@ -542,7 +541,15 @@ function setEngine(name){
   else if (name === 'anthropic') { dot.className='eng-dot live'; t.textContent='Claude 라이브'; }
   else { dot.className='eng-dot stub'; t.textContent='데모(무과금)'; }
 }
-function setCredits(){ $('#credN').textContent = credits; }
+/* 포인트 지갑: 가입 보너스에서 실사용 토큰 원가만큼 차감(젠스파크식). 게스트/데모는 무과금 */
+function setBalance(b){
+  $('#balN').textContent = (b == null) ? '데모(무과금)' : b.toLocaleString('ko-KR') + 'P';
+}
+function applyBilling(b){
+  if (!b) return;
+  if (b.balance != null) setBalance(b.balance);
+  if (b.points_charged > 0) toast(`이번 사용 ${b.points_charged}P 차감 · 잔액 ${b.balance.toLocaleString('ko-KR')}P`, 3000);
+}
 
 /* ── 채팅 ── */
 tabs.addEventListener('click', e => {
@@ -556,8 +563,8 @@ function meBubble(text){
   msgs.appendChild(r); msgs.scrollTop=msgs.scrollHeight;
 }
 function agentBubble(pKey, who, text, cites){
-  const m = PERSONA[pKey] || {name:'G', color:'var(--ink)'};
-  const initial = pKey ? m.name[0] : 'G';
+  const m = PERSONA[pKey] || {name:'🐡', color:'var(--ink)'};
+  const initial = pKey ? m.name[0] : '🐡';
   const r=document.createElement('div'); r.className='m-row';
   const chips=(cites&&cites.length)?`<div class="cites" style="margin-top:7px">${cites.map(c=>`<span class="cite">${c}</span>`).join('')}</div>`:'';
   r.innerHTML=`<div class="avatar" style="background:${m.color}">${esc(initial)}</div>
@@ -599,7 +606,7 @@ async function sendChat() {
       sysBubble('지표 갱신: ' + Object.entries(d.updated_fields).map(([k,v])=>`${FIELD_LABELS[k]||k} ${v}`).join(', '));
     }
     (d.turns || []).forEach(t => agentBubble(t.persona, `${t.label}`, t.reply, t.citations));
-    credits += d.billing.credits_charged || 0; setCredits();
+    applyBilling(d.billing);
     setEngine(d.billing.provider);
     history.push({ role:'user', text });
     (d.turns || []).forEach(t => history.push({ role:'agent', text: t.reply }));
@@ -631,6 +638,7 @@ async function doAuth(path){
   try {
     const d = await api(path, {method:'POST', body: JSON.stringify({username, password})});
     auth = { token: d.token, username: d.username };
+    if (d.balance != null) setBalance(d.balance);
     localStorage.setItem(AKEY, JSON.stringify(auth));
     localStorage.removeItem(SKEY);  // 게스트 세션과 분리
     authModal.hidden = true;
@@ -645,6 +653,7 @@ async function loadWorkspace(){
   $('#authBtn').textContent = '로그아웃';
   window._ctx = { merchant:'내 가게', fields:{} };
   try {
+    api('/auth/me/').then(me => setBalance(me.balance)).catch(()=>{});
     const list = await api('/onboarding/merchants/');
     msgs.innerHTML = ''; history = [];
     if (list.length) {
@@ -667,12 +676,12 @@ async function loadWorkspace(){
         if (x.role === 'user') meBubble(x.text);
         else if (x.role === 'system') sysBubble(x.text);
         else agentBubble(x.persona || '',
-          x.persona && PERSONA[x.persona] ? PERSONA[x.persona].name + ' 에이전트' : '지오', x.text, []);
+          x.persona && PERSONA[x.persona] ? PERSONA[x.persona].name + ' 에이전트' : '복어 Fugu', x.text, []);
       });
     }
     if (!msgs.children.length) {
-      agentBubble('', '지오 · 오케스트레이터',
-        `${auth.username}님, 반갑습니다. 질문을 하거나 "데이터 입력"으로 가게를 등록하세요 — 모든 것이 서버에 저장됩니다.`, []);
+      agentBubble('', '🐡 복어 Fugu · 오케스트레이터',
+        `${auth.username}님, 반갑습니다. 저는 마케팅 오케스트레이터 복어(Fugu)예요. 질문을 하거나 "데이터 입력"으로 가게를 등록하세요 — 모든 대화가 서버에 저장되고, 오래된 대화도 요약 기억으로 이어집니다.`, []);
     }
   } catch (e) { toast('워크스페이스 불러오기 실패: ' + e.message, 6000); }
 }
@@ -720,8 +729,8 @@ async function genReport(tier){
       await new Promise(res => setTimeout(res, 4000));
       const d = await api('/reports/'+r.id+'/');
       if (d.status === 'done') {
-        credits += d.credits_charged || 0; setCredits();
-        $('#repMsg').textContent = `완료 — 호출 ${d.meta.calls}회 · ${d.credits_charged}크레딧` +
+        api('/auth/me/').then(me => setBalance(me.balance)).catch(()=>{});
+        $('#repMsg').textContent = `완료 — 호출 ${d.meta.calls}회 · ${d.points_charged || 0}P 차감` +
           (d.meta.focus_search ? ` · 탐색 ${d.meta.focus_search.engine}` : '');
         $('#repView').innerHTML = mdToHtml(d.content_md);
         refreshReports(); return;
@@ -738,7 +747,7 @@ $('#genDeep').addEventListener('click', () => genReport('deep'));
 function saveSession(){
   if (auth) return;
   try { localStorage.setItem(SKEY, JSON.stringify({
-    ctx: window._ctx, advice: window._advice, history, chat: msgs.innerHTML, credits })); } catch(e){}
+    ctx: window._ctx, advice: window._advice, history, chat: msgs.innerHTML })); } catch(e){}
 }
 $('#reset').addEventListener('click', () => { localStorage.removeItem(SKEY); location.reload(); });
 
@@ -749,16 +758,15 @@ $('#reset').addEventListener('click', () => { localStorage.removeItem(SKEY); loc
 
   let s; try { s = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch(e){}
   if (s && s.ctx) {
-    window._ctx = s.ctx; history = s.history || []; credits = s.credits || 0;
+    window._ctx = s.ctx; history = s.history || [];
     if (s.advice) applyAdvice(s.advice);
-    setCredits();
     if (s.chat) msgs.innerHTML = s.chat;
   } else {
     window._ctx = { merchant:'내 가게', fields:{} };
   }
   if (!msgs.children.length) {
-    agentBubble('', '지오 · 오케스트레이터',
-      '안녕하세요, 마케팅을 도와드릴 지오입니다. 바로 질문하셔도 되고, 좌측 "데이터 입력"으로 가게 숫자를 넣으면 맞춤 KPI와 액션을 받을 수 있어요. 로그인하면 모든 데이터가 서버에 저장돼 어느 기기에서든 이어집니다.\n예) "신규 손님을 늘리려면?", "재방문율을 어떻게 올리죠?"', []);
+    agentBubble('', '🐡 복어 Fugu · 오케스트레이터',
+      '안녕하세요, 마케팅을 도와드릴 복어(Fugu)입니다. 바로 질문하셔도 되고, 좌측 "데이터 입력"으로 가게 숫자를 넣으면 맞춤 KPI와 액션을 받을 수 있어요. 가입하면 무료 10,000P를 드리고, 모든 대화가 서버에 저장돼 어느 기기에서든 이어집니다.\n예) "신규 손님을 늘리려면?", "재방문율을 어떻게 올리죠?"', []);
     saveSession();
   }
 })();

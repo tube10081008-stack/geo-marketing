@@ -1,7 +1,7 @@
 """
 Vercel 서버리스: POST /api/chat — 세 에이전트와 멀티턴 대화 (self-contained).
 
-지오가 메시지를 적합 페르소나로 라우팅(저가 모델/규칙) → 해당 페르소나가
+복어(Fugu)가 메시지를 적합 페르소나로 라우팅(저가 모델/규칙) → 해당 페르소나가
 베이스라인 + 대화이력 + [M#] 코퍼스로 답하고, 영역 밖이면 다른 에이전트로 핸드오프.
 stateless: 대화이력은 프런트가 들고 매 턴 재전송(Messages API 패턴).
 """
@@ -63,7 +63,7 @@ class Stub:
     def complete(self, model, system, prompt, max_tokens=40):
         return prompt, (len((system + prompt)) // 4, 8)
 
-    def chat(self, system, contents, max_tokens=600):
+    def chat(self, system, contents, max_tokens=1024):
         # 결정적: 마지막 사용자 메시지 + 페르소나 첫 인용으로 grounded 응답
         last = contents[-1]["parts"][0]["text"] if contents else ""
         return (f"(데모/Stub 응답) '{last}'에 대해 베이스라인과 코퍼스를 근거로 보면, "
@@ -97,7 +97,7 @@ class Gemini:
     def complete(self, model, system, prompt, max_tokens=40):
         return self._post(model, system, [{"role": "user", "parts": [{"text": prompt}]}], max_tokens)
 
-    def chat(self, system, contents, max_tokens=600):
+    def chat(self, system, contents, max_tokens=1024):
         return self._post(self.generator_model, system, contents, max_tokens)
 
 

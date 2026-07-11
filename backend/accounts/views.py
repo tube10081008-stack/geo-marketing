@@ -10,12 +10,15 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .models import get_wallet
+
 User = get_user_model()
 
 
 def _token_payload(user):
     token, _ = Token.objects.get_or_create(user=user)
-    return {"token": token.key, "username": user.username, "email": user.email}
+    return {"token": token.key, "username": user.username, "email": user.email,
+            "balance": get_wallet(user).balance}
 
 
 class RegisterView(APIView):
@@ -55,4 +58,5 @@ class MeView(APIView):
 
     def get(self, request):
         u = request.user
-        return Response({"username": u.username, "email": u.email})
+        return Response({"username": u.username, "email": u.email,
+                         "balance": get_wallet(u).balance})

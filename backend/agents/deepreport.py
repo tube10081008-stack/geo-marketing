@@ -1,5 +1,5 @@
 """
-P2.5 지오 딥리포트 파이프라인 (Marlin-lite, RESEARCH-treequest-marlin.md §2.2).
+P2.5 복어(Fugu) 딥리포트 파이프라인 (Marlin-lite, RESEARCH-treequest-marlin.md §2.2).
 
 구조: 컨텍스트 수집 → 섹션 생성(딥 티어는 '이달의 포커스'만 AB-MCTS 탐색) → 합성(MD).
 - 원가 통제: 저가 provider 재사용, 탐색은 포커스 1개 섹션·소예산에만.
@@ -69,7 +69,7 @@ def _gen_section(provider, meter, title, persona, ctx, refine_from=None):
         label = f"{PERSONA_META[persona]['emoji']} {PERSONA_META[persona]['name']}"
         role = f"'{label}' 담당 에이전트"
     else:
-        role = "마케팅 총괄(지오)"
+        role = "마케팅 총괄 🐡 복어(Fugu)"
     system = (f"너는 소상공인 리포트의 '{title}' 섹션을 쓰는 {role}다. "
               "Markdown, 6~12줄, 측정가능한 목표와 [M#] 인용 필수. 출처 없는 단정 금지. "
               "수치 근거는 원 연구 맥락(주로 해외)임을 유지하고 실측 A/B로 검증한다고 명시.")
@@ -117,7 +117,7 @@ def run_report(report_id: int):
         card, ctx = _context(report.merchant)
         log: dict = {}
 
-        parts = [f"# {report.merchant.name} — 지오 딥리포트",
+        parts = [f"# {report.merchant.name} — 🐡 Fugu 딥리포트",
                  f"_{timezone.now():%Y-%m-%d} · 데이터등급 {card['overall_data_grade']} · 티어 {report.tier}_"]
         for key, title, persona in SECTIONS:
             if key == "focus" and report.tier == DeepReport.Tier.DEEP:
@@ -129,9 +129,15 @@ def run_report(report_id: int):
                      "효과는 이 가게의 실측 A/B로 검증합니다. 데모(stub) 생성분은 무과금._")
 
         report.content_md = "\n".join(parts)
-        report.credits_charged = 0 if provider.name == "stub" else meter.credits()
+        # 포인트 과금: 실사용 원가를 소유 계정 지갑에서 차감(Stub은 무과금)
+        points = 0
+        if provider.name != "stub" and report.merchant.owner_id:
+            from accounts.models import charge
+            points, _ = charge(report.merchant.owner, meter.total_cost_usd())
+        report.credits_charged = points  # 필드명 유지, 값은 포인트
         report.meta = {"provider": provider.name, "calls": len(meter.calls),
-                       "raw_cost_usd": round(meter.total_cost_usd(), 6), **log}
+                       "raw_cost_usd": round(meter.total_cost_usd(), 6),
+                       "points_charged": points, **log}
         report.status = DeepReport.Status.DONE
     except Exception as exc:  # noqa: BLE001 — 잡 실패는 상태로 보고
         report.status = DeepReport.Status.FAILED
