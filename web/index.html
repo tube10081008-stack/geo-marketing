@@ -155,6 +155,20 @@
            border-radius:9px; padding:11px 13px; margin-top:8px; font-size:12px; color:var(--ink-2);}
   .consent input{width:16px; height:16px; accent-color:var(--accent); flex:none;}
 
+  /* 토스트·리포트 뷰 */
+  #toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:99;
+         background:var(--ink); color:#fff; font-size:12.5px; padding:10px 16px; border-radius:10px;
+         box-shadow:0 8px 24px rgba(11,18,32,.3);}
+  .rep-item{display:flex; align-items:center; justify-content:space-between; gap:10px;
+            padding:10px 2px; border-bottom:1px solid var(--line-2); font-size:13px; cursor:pointer;}
+  .rep-item:hover{background:#FBFCFD;}
+  .rep-status{font-size:11px; font-weight:800; padding:2px 9px; border-radius:99px;}
+  .rs-done{background:#E7F5EC; color:#0B7A52;} .rs-running{background:#FFF4DC; color:#B45309;}
+  .rs-failed{background:#FDECEC; color:#C0392B;} .rs-pending{background:var(--line-2); color:var(--mut);}
+  .md{font-size:13.5px; line-height:1.75; color:var(--ink-2);}
+  .md h1{font-size:18px; margin:6px 0 2px;} .md h2{font-size:14.5px; margin:18px 0 6px; color:var(--ink);
+        padding-bottom:5px; border-bottom:1px solid var(--line-2);}
+  .md ul{margin:4px 0; padding-left:18px;} .md hr{border:0; border-top:1px solid var(--line); margin:14px 0;}
   @keyframes blink{0%,60%,100%{opacity:.3;} 30%{opacity:1;}}
   @media(max-width:960px){ .kpis{grid-template-columns:repeat(3,1fr);} .acts{grid-template-columns:1fr;} }
   @media(max-width:760px){
@@ -186,9 +200,12 @@
     </nav>
     <div class="spacer"></div>
     <div class="status">
+      <div class="stat-line"><span>계정</span><b id="acctName">게스트(브라우저 저장)</b></div>
       <div class="stat-line"><span><i class="eng-dot" id="engDot"></i>엔진</span><b id="engName">대기</b></div>
       <div class="stat-line"><span>사용 크레딧</span><b id="credN">0</b></div>
       <button class="btn" id="openData">데이터 입력</button>
+      <button class="btn ghost" id="reportBtn" hidden>📄 딥리포트</button>
+      <button class="btn ghost" id="authBtn">로그인 / 가입</button>
       <button class="btn ghost" id="reset">새로 시작</button>
     </div>
   </aside>
@@ -299,6 +316,46 @@
   </div>
 </div>
 
+<!-- ── 로그인/가입 모달 ── -->
+<div class="overlay" id="authModal" hidden>
+  <div class="modal" style="max-width:400px">
+    <div class="modal-head">
+      <div><h2>로그인 / 가입</h2><p>계정을 만들면 어느 기기에서든 가게 데이터·대화가 이어집니다.</p></div>
+      <button class="x" id="closeAuth" aria-label="닫기">✕</button>
+    </div>
+    <div style="padding:6px 22px 22px">
+      <div class="field"><label>아이디 (3자 이상)</label><input id="authUser" autocomplete="username" /></div>
+      <div class="field"><label>비밀번호 (6자 이상)</label><input id="authPass" type="password" autocomplete="current-password" /></div>
+      <div id="authMsg" style="font-size:12px; color:#C0392B; min-height:16px; margin:4px 0"></div>
+      <div class="row2">
+        <button class="btn" id="doLogin" type="button">로그인</button>
+        <button class="btn ghost" id="doRegister" type="button">새 계정 만들기</button>
+      </div>
+      <p style="font-size:11px; color:var(--faint); margin:12px 0 0">
+        무료 서버라 잠들어 있으면 첫 응답에 최대 1분이 걸릴 수 있어요.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── 딥리포트 모달 ── -->
+<div class="overlay" id="repModal" hidden>
+  <div class="modal" style="max-width:720px">
+    <div class="modal-head">
+      <div><h2>📄 지오 딥리포트</h2><p>가게 맞춤 월간 리포트 — 딥 티어는 핵심 섹션을 AB-MCTS로 탐색합니다.</p></div>
+      <button class="x" id="closeRep" aria-label="닫기">✕</button>
+    </div>
+    <div style="padding:6px 22px 22px">
+      <div class="row2" style="margin-bottom:12px">
+        <button class="btn ghost" id="genLite" type="button">라이트 생성</button>
+        <button class="btn" id="genDeep" type="button">딥 생성 (AB-MCTS)</button>
+      </div>
+      <div id="repMsg" style="font-size:12px; color:var(--mut); min-height:16px; margin-bottom:8px"></div>
+      <div id="repList"></div>
+      <div id="repView" class="md" style="margin-top:14px"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 const PERSONA = {
   acq:{name:'획득', color:'var(--acq)', hex:'#2a78d6'},
@@ -310,8 +367,34 @@ const FIELD_LABELS = {avg_rating:'평점', review_count:'리뷰수', place_click
   aov:'객단가', monthly_customers:'월 고객수', revisit_rate:'재방문율', regular_ratio:'단골비중',
   visit_to_purchase_rate:'전환율', nps:'NPS'};
 const SKEY = 'geo_session_v4';
+const AKEY = 'geo_auth_v1';
+const BACKEND = 'https://geo-marketing-api.onrender.com/api/v1';
 
 const $ = s => document.querySelector(s);
+let auth = null;   // {token, username}
+let mid = null;    // 서버 merchant id (로그인 모드)
+
+/* ── 백엔드 호출 헬퍼: 토큰 + 콜드스타트 토스트 ── */
+function toast(msg, ms=4000){
+  let t = $('#toast');
+  if (!t) { t = document.createElement('div'); t.id='toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(t._h); t._h = setTimeout(()=>{ t.hidden = true; }, ms);
+}
+async function api(path, opts={}){
+  const slow = setTimeout(()=>toast('무료 서버를 깨우는 중… 최대 1분 걸릴 수 있어요 ☕'), 3000);
+  try {
+    const res = await fetch(BACKEND + path, {
+      ...opts,
+      headers: { 'Content-Type':'application/json',
+                 ...(auth ? {'Authorization':'Token '+auth.token} : {}),
+                 ...(opts.headers||{}) },
+    });
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP '+res.status));
+    return data;
+  } finally { clearTimeout(slow); }
+}
 const f = $('#f'), go = $('#go'), modal = $('#modal');
 const msgs = $('#msgs'), msgInput = $('#msg'), sendBtn = $('#send'), tabs = $('#tabs');
 let persona = '', history = [], credits = 0;
@@ -339,30 +422,62 @@ document.querySelectorAll('nav a').forEach(a => a.addEventListener('click', () =
   a.classList.add('on');
 }));
 
-/* ── 데이터 제출 → 분석 ── */
+/* ── 데이터 제출 → 분석 (게스트=Vercel 서버리스 / 로그인=Render 백엔드) ── */
+const num = v => { const n = parseFloat(String(v||'').replace(/,/g,'')); return isNaN(n) ? null : n; };
+const gradeOf = (...vals) => vals.some(v => num(v) != null) ? 'C' : 'D';
+
 f.addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (!$('#consent').checked) { alert('고객데이터 위탁처리 동의가 필요합니다(개인정보 게이트).'); return; }
+  if (!$('#consent').checked) { alert('입력 정보 처리 동의가 필요합니다.'); return; }
   const fd = new FormData(f);
   const merchant = fd.get('merchant') || '내 가게';
   const question = fd.get('question') || '';
   const fields = {};
   ['place_clicks','review_count','avg_rating','monthly_revenue','monthly_customers',
    'aov','revisit_rate','regular_ratio'].forEach(k => fields[k] = fd.get(k));
+  // 객단가 미입력 시 매출÷고객수 자동계산(양 모드 공통)
+  if (!num(fields.aov) && num(fields.monthly_revenue) && num(fields.monthly_customers))
+    fields.aov = String(Math.round(num(fields.monthly_revenue)/num(fields.monthly_customers)));
   window._ctx = { merchant, fields };
 
   go.disabled = true; go.textContent = '분석 중…';
   try {
-    const res = await fetch('/api/advise', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ merchant, fields, question })
-    });
-    const d = await res.json();
-    if (d.error) throw new Error(d.error);
+    let d;
+    if (auth) {
+      // Django: 업체 생성/수정 → advise
+      const payload = {
+        name: merchant, industry: fd.get('industry')||'etc', location: fd.get('location')||'',
+        consent_data_processing: true,
+        ...(num(fields.monthly_revenue)!=null ? {monthly_revenue: num(fields.monthly_revenue)} : {}),
+        acquisition: { data_grade: gradeOf(fields.avg_rating, fields.review_count, fields.place_clicks),
+          ...(num(fields.place_clicks)!=null ? {place_clicks:num(fields.place_clicks)} : {}),
+          ...(num(fields.review_count)!=null ? {review_count:num(fields.review_count)} : {}),
+          ...(fields.avg_rating ? {avg_rating:String(fields.avg_rating)} : {}) },
+        conversion: { data_grade: gradeOf(fields.aov, fields.monthly_customers),
+          ...(num(fields.aov)!=null ? {aov:Math.round(num(fields.aov))} : {}),
+          ...(num(fields.monthly_customers)!=null ? {monthly_customers:num(fields.monthly_customers)} : {}) },
+        retention: { data_grade: gradeOf(fields.revisit_rate, fields.regular_ratio),
+          ...(fields.revisit_rate ? {revisit_rate:String(fields.revisit_rate)} : {}),
+          ...(fields.regular_ratio ? {regular_ratio:String(fields.regular_ratio)} : {}) },
+      };
+      const saved = mid
+        ? await api(`/onboarding/merchants/${mid}/`, {method:'PUT', body:JSON.stringify(payload)})
+        : await api('/onboarding/merchants/', {method:'POST', body:JSON.stringify(payload)});
+      mid = saved.id; $('#reportBtn').hidden = false;
+      d = await api('/agents/advise/', {method:'POST', body:JSON.stringify({merchant_id:mid, question})});
+    } else {
+      const res = await fetch('/api/advise', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ merchant, fields, question })
+      });
+      d = await res.json();
+      if (d.error) throw new Error(d.error);
+    }
     credits += d.billing.credits_charged || 0;
     applyAdvice(d);
     closeModal();
-    sysBubble('베이스라인 등록 완료 — 개요에 KPI·액션을 반영했어요. 궁금한 걸 물어보세요.');
+    sysBubble(auth ? '서버에 저장 완료 — 어느 기기에서든 이어집니다. 궁금한 걸 물어보세요.'
+                   : '베이스라인 등록 완료 — 개요에 KPI·액션을 반영했어요. (로그인하면 서버에 저장돼요)');
     saveSession();
   } catch (err) {
     alert('전송 실패: ' + err.message);
@@ -462,13 +577,22 @@ async function sendChat() {
   if (!window._ctx) window._ctx = { merchant:'내 가게', fields:{} };
   meBubble(text); msgInput.value=''; sendBtn.disabled=true; typingOn();
   try {
-    const res = await fetch('/api/chat', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ merchant: window._ctx.merchant, fields: window._ctx.fields,
-                             history, message: text, persona: persona || null })
-    });
-    const d = await res.json(); typingOff();
-    if (d.error) throw new Error(d.error);
+    let d;
+    if (auth && mid) {
+      // 로그인 모드: 서버가 이력을 보유·영속 (베이스라인 갱신도 DB 반영)
+      d = await api('/agents/chat/', {method:'POST',
+        body: JSON.stringify({ merchant_id: mid, message: text, persona: persona || null })});
+      typingOff();
+    } else {
+      if (auth && !mid) toast('아직 가게 미등록 — "데이터 입력"으로 저장하면 대화도 서버에 남아요');
+      const res = await fetch('/api/chat', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ merchant: window._ctx.merchant, fields: window._ctx.fields,
+                               history, message: text, persona: persona || null })
+      });
+      d = await res.json(); typingOff();
+      if (d.error) throw new Error(d.error);
+    }
     if (d.updated_fields && Object.keys(d.updated_fields).length) {
       Object.assign(window._ctx.fields, d.updated_fields);
       renderKpis();
@@ -489,14 +613,140 @@ async function sendChat() {
 sendBtn.addEventListener('click', sendChat);
 msgInput.addEventListener('keydown', e => { if (e.key==='Enter') sendChat(); });
 
-/* ── 영속화 ── */
+/* ── 계정(로그인/가입/로그아웃) ── */
+const authModal = $('#authModal');
+$('#authBtn').addEventListener('click', () => {
+  if (auth) {
+    if (confirm('로그아웃할까요? (데이터는 서버에 안전하게 남아있어요)')) {
+      localStorage.removeItem(AKEY); localStorage.removeItem(SKEY); location.reload();
+    }
+  } else { authModal.hidden = false; }
+});
+$('#closeAuth').addEventListener('click', () => { authModal.hidden = true; });
+authModal.addEventListener('click', e => { if (e.target === authModal) authModal.hidden = true; });
+
+async function doAuth(path){
+  const username = $('#authUser').value.trim(), password = $('#authPass').value;
+  $('#authMsg').textContent = '';
+  try {
+    const d = await api(path, {method:'POST', body: JSON.stringify({username, password})});
+    auth = { token: d.token, username: d.username };
+    localStorage.setItem(AKEY, JSON.stringify(auth));
+    localStorage.removeItem(SKEY);  // 게스트 세션과 분리
+    authModal.hidden = true;
+    await loadWorkspace();
+  } catch (e) { $('#authMsg').textContent = e.message; }
+}
+$('#doLogin').addEventListener('click', () => doAuth('/auth/login/'));
+$('#doRegister').addEventListener('click', () => doAuth('/auth/register/'));
+
+async function loadWorkspace(){
+  $('#acctName').textContent = auth.username;
+  $('#authBtn').textContent = '로그아웃';
+  window._ctx = { merchant:'내 가게', fields:{} };
+  try {
+    const list = await api('/onboarding/merchants/');
+    msgs.innerHTML = ''; history = [];
+    if (list.length) {
+      const m = list[0]; mid = m.id; $('#reportBtn').hidden = false;
+      const a = m.acquisition||{}, cv = m.conversion||{}, rt = m.retention||{};
+      window._ctx = { merchant: m.name, fields: {
+        avg_rating: a.avg_rating ?? '', review_count: a.review_count ?? '',
+        place_clicks: a.place_clicks ?? '', monthly_revenue: m.monthly_revenue ?? '',
+        monthly_customers: cv.monthly_customers ?? '', aov: cv.aov ?? '',
+        revisit_rate: rt.revisit_rate ?? '', regular_ratio: rt.regular_ratio ?? '' } };
+      $('#pageTitle').textContent = m.name; $('#wsName').textContent = m.name;
+      const g = m.overall_data_grade;
+      if (g) { const p = $('#wsGrade'); p.hidden = false; p.textContent = '데이터 ' + g;
+               p.style.background = GRADE_COLOR[g] || '#9AA3B5'; }
+      $('#wsSub').textContent = '서버 저장됨 · 모든 기기에서 이어보기';
+      $('#emptyBanner').hidden = true;
+      renderKpis();
+      const h = await api(`/agents/history/${mid}/`);
+      h.messages.forEach(x => {
+        if (x.role === 'user') meBubble(x.text);
+        else if (x.role === 'system') sysBubble(x.text);
+        else agentBubble(x.persona || '',
+          x.persona && PERSONA[x.persona] ? PERSONA[x.persona].name + ' 에이전트' : '지오', x.text, []);
+      });
+    }
+    if (!msgs.children.length) {
+      agentBubble('', '지오 · 오케스트레이터',
+        `${auth.username}님, 반갑습니다. 질문을 하거나 "데이터 입력"으로 가게를 등록하세요 — 모든 것이 서버에 저장됩니다.`, []);
+    }
+  } catch (e) { toast('워크스페이스 불러오기 실패: ' + e.message, 6000); }
+}
+
+/* ── 딥리포트 ── */
+const repModal = $('#repModal');
+$('#reportBtn').addEventListener('click', async () => { repModal.hidden = false; $('#repView').innerHTML=''; refreshReports(); });
+$('#closeRep').addEventListener('click', () => { repModal.hidden = true; });
+repModal.addEventListener('click', e => { if (e.target === repModal) repModal.hidden = true; });
+
+function mdToHtml(md){
+  let h = esc(md);
+  h = h.replace(/^### (.*)$/gm, '<h3>$1</h3>').replace(/^## (.*)$/gm, '<h2>$1</h2>')
+       .replace(/^# (.*)$/gm, '<h1>$1</h1>').replace(/^---$/gm, '<hr/>')
+       .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|\n)_([^_\n]+)_/g, '$1<i>$2</i>')
+       .replace(/^- (.*)$/gm, '<li>$1</li>').replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>'+m+'</ul>')
+       .replace(/\n{2,}/g, '<br/><br/>');
+  return h;
+}
+function repRow(r){
+  const cls = {done:'rs-done', running:'rs-running', failed:'rs-failed', pending:'rs-pending'}[r.status]||'rs-pending';
+  const label = {done:'완료', running:'생성 중', failed:'실패', pending:'대기'}[r.status]||r.status;
+  return `<div class="rep-item" data-id="${r.id}" data-st="${r.status}">
+    <span>#${r.id} · ${r.tier==='deep'?'딥(AB-MCTS)':'라이트'} · ${new Date(r.created_at).toLocaleString('ko-KR')}</span>
+    <span class="rep-status ${cls}">${label}</span></div>`;
+}
+async function refreshReports(){
+  if (!mid) return [];
+  const list = await api('/reports/?merchant_id='+mid);
+  $('#repList').innerHTML = list.map(repRow).join('') || '<div style="font-size:12.5px;color:var(--faint)">아직 리포트가 없습니다.</div>';
+  return list;
+}
+$('#repList').addEventListener('click', async e => {
+  const row = e.target.closest('.rep-item'); if (!row || row.dataset.st !== 'done') return;
+  const d = await api('/reports/'+row.dataset.id+'/');
+  $('#repView').innerHTML = mdToHtml(d.content_md);
+});
+async function genReport(tier){
+  if (!mid) { toast('먼저 "데이터 입력"으로 가게를 등록하세요'); return; }
+  $('#repMsg').textContent = '생성을 시작했어요 — 딥 티어는 2~5분 걸립니다. 창을 닫아도 서버에서 계속 만들어요.';
+  try {
+    const r = await api('/reports/', {method:'POST', body: JSON.stringify({merchant_id: mid, tier})});
+    await refreshReports();
+    for (let i = 0; i < 120; i++) {
+      await new Promise(res => setTimeout(res, 4000));
+      const d = await api('/reports/'+r.id+'/');
+      if (d.status === 'done') {
+        credits += d.credits_charged || 0; setCredits();
+        $('#repMsg').textContent = `완료 — 호출 ${d.meta.calls}회 · ${d.credits_charged}크레딧` +
+          (d.meta.focus_search ? ` · 탐색 ${d.meta.focus_search.engine}` : '');
+        $('#repView').innerHTML = mdToHtml(d.content_md);
+        refreshReports(); return;
+      }
+      if (d.status === 'failed') { $('#repMsg').textContent = '실패: ' + d.error; refreshReports(); return; }
+    }
+    $('#repMsg').textContent = '아직 생성 중 — 잠시 후 목록에서 확인하세요.';
+  } catch (e) { $('#repMsg').textContent = '오류: ' + e.message; }
+}
+$('#genLite').addEventListener('click', () => genReport('lite'));
+$('#genDeep').addEventListener('click', () => genReport('deep'));
+
+/* ── 영속화(게스트 모드 전용 — 로그인 시 서버가 원천) ── */
 function saveSession(){
+  if (auth) return;
   try { localStorage.setItem(SKEY, JSON.stringify({
     ctx: window._ctx, advice: window._advice, history, chat: msgs.innerHTML, credits })); } catch(e){}
 }
 $('#reset').addEventListener('click', () => { localStorage.removeItem(SKEY); location.reload(); });
 
 (function init(){
+  // 로그인 세션이 있으면 서버 워크스페이스 복원(게스트 저장분은 무시)
+  try { auth = JSON.parse(localStorage.getItem(AKEY) || 'null'); } catch(e){ auth = null; }
+  if (auth && auth.token) { loadWorkspace(); return; }
+
   let s; try { s = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch(e){}
   if (s && s.ctx) {
     window._ctx = s.ctx; history = s.history || []; credits = s.credits || 0;
@@ -508,7 +758,7 @@ $('#reset').addEventListener('click', () => { localStorage.removeItem(SKEY); loc
   }
   if (!msgs.children.length) {
     agentBubble('', '지오 · 오케스트레이터',
-      '안녕하세요, 마케팅을 도와드릴 지오입니다. 바로 질문하셔도 되고, 좌측 "데이터 입력"으로 가게 숫자를 넣으면 맞춤 KPI와 액션을 받을 수 있어요.\n예) "신규 손님을 늘리려면?", "재방문율을 어떻게 올리죠?"', []);
+      '안녕하세요, 마케팅을 도와드릴 지오입니다. 바로 질문하셔도 되고, 좌측 "데이터 입력"으로 가게 숫자를 넣으면 맞춤 KPI와 액션을 받을 수 있어요. 로그인하면 모든 데이터가 서버에 저장돼 어느 기기에서든 이어집니다.\n예) "신규 손님을 늘리려면?", "재방문율을 어떻게 올리죠?"', []);
     saveSession();
   }
 })();

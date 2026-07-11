@@ -23,14 +23,16 @@ _PATTERNS = {
     "review_count": r"리뷰\s*(?:가|는|를|:)?\s*(\d{2,6})\s*(?:개|건)?",
     "aov": r"객단가\s*(?:은|는|이|:)?\s*([\d,]{4,})",
     "nps": r"(?i)nps\s*(?:은|는|이|:)?\s*(-?\d{1,3})",
+    "regular_ratio": r"단골\s*(?:비중|비율)?\s*(?:은|이|:)?\s*(\d{1,3})\s*%?",
+    "monthly_customers": r"(?:월\s*)?고객\s*(?:수)?\s*(?:는|은|가|:)?\s*([\d,]{2,7})\s*명",
 }
 
 
 def _card_summary(card):
     a, c, r = card.get("acquisition") or {}, card.get("conversion") or {}, card.get("retention") or {}
     return (f"평점 {a.get('avg_rating')}, 리뷰 {a.get('review_count')}, "
-            f"객단가 {c.get('aov_krw')}, 전환율 {c.get('visit_to_purchase_rate_pct')}%, "
-            f"재방문 {r.get('revisit_rate_pct')}%, NPS {r.get('nps')}")
+            f"객단가 {c.get('aov_krw')}, 월고객수 {c.get('monthly_customers')}, "
+            f"재방문 {r.get('revisit_rate_pct')}%, 단골비중 {r.get('regular_ratio_pct')}%")
 
 
 # 목표/희망 발화("평점을 4.5로 올리고 싶어요")를 사실로 오인하지 않기 위한 의도어 가드(REVIEW §2)

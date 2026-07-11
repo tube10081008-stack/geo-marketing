@@ -24,6 +24,32 @@ def _merchant(request, merchant_id):
     return get_object_or_404(Merchant, pk=merchant_id, owner=request.user)
 
 
+# 대화 추출 지표 → 베이스라인 모델 매핑(서버가 진실의 원천)
+_UPDATE_MAP = {
+    "avg_rating": ("acquisition", "avg_rating"),
+    "review_count": ("acquisition", "review_count"),
+    "aov": ("conversion", "aov"),
+    "monthly_customers": ("conversion", "monthly_customers"),
+    "visit_to_purchase_rate": ("conversion", "visit_to_purchase_rate"),
+    "revisit_rate": ("retention", "revisit_rate"),
+    "regular_ratio": ("retention", "regular_ratio"),
+    "nps": ("retention", "nps"),
+}
+
+
+def _apply_updates(merchant, updates: dict):
+    """대화 중 갱신된 지표를 DB에 영속. 없는 베이스라인은 건너뜀(등급은 수기=C 유지)."""
+    for key, value in updates.items():
+        target = _UPDATE_MAP.get(key)
+        if not target:
+            continue
+        rel, field = target
+        base = getattr(merchant, rel, None)
+        if base is not None:
+            setattr(base, field, value)
+            base.save(update_fields=[field])
+
+
 class AdviseView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -49,9 +75,10 @@ class ChatView(APIView):
         ]
         result = run_chat(merchant, history, message, forced)
 
-        # 영속: 사용자 메시지 + (갱신 시)시스템 + 에이전트 답변들
+        # 영속: 사용자 메시지 + (갱신 시)베이스라인 DB 반영 + 시스템 + 에이전트 답변들
         ChatMessage.objects.create(merchant=merchant, role="user", text=message)
         if result.get("updated_fields"):
+            _apply_updates(merchant, result["updated_fields"])
             ChatMessage.objects.create(
                 merchant=merchant, role="system",
                 text="베이스라인 갱신: " + ", ".join(

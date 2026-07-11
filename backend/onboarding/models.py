@@ -134,6 +134,7 @@ class Merchant(models.Model):
         if cvr:
             card["conversion"] = {
                 "aov_krw": cvr.aov,
+                "monthly_customers": cvr.monthly_customers,
                 "visit_to_purchase_rate_pct": (
                     float(cvr.visit_to_purchase_rate)
                     if cvr.visit_to_purchase_rate is not None else None
@@ -144,6 +145,9 @@ class Merchant(models.Model):
             card["retention"] = {
                 "revisit_rate_pct": (
                     float(ret.revisit_rate) if ret.revisit_rate is not None else None
+                ),
+                "regular_ratio_pct": (
+                    float(ret.regular_ratio) if ret.regular_ratio is not None else None
                 ),
                 "nps": ret.nps,
                 "grade": ret.data_grade,
@@ -219,6 +223,10 @@ class ConversionBaseline(models.Model):
     )
     aov = models.PositiveIntegerField(
         "객단가 AOV(원)", null=True, blank=True, help_text="매출/객수",
+    )
+    monthly_customers = models.PositiveIntegerField(
+        "월 고객수(명)", null=True, blank=True,
+        help_text="intake v1.1 — 사장님이 아는 숫자. 객단가 자동계산의 분모",
     )
     visit_to_purchase_rate = models.DecimalField(
         "방문→구매 전환율(%)", max_digits=5, decimal_places=1, null=True, blank=True,
