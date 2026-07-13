@@ -731,7 +731,8 @@ async function genReport(tier){
       if (d.status === 'done') {
         api('/auth/me/').then(me => setBalance(me.balance)).catch(()=>{});
         $('#repMsg').textContent = `완료 — 호출 ${d.meta.calls}회 · ${d.points_charged || 0}P 차감` +
-          (d.meta.focus_search ? ` · 탐색 ${d.meta.focus_search.engine}` : '');
+          (d.meta.focus_search ? ` · 탐색 ${d.meta.focus_search.engine}` : '') +
+          (d.meta.provider === 'stub' ? ' · ⚠️ 데모 생성(서버 API 키 미설정)' : '');
         $('#repView').innerHTML = mdToHtml(d.content_md);
         refreshReports(); return;
       }

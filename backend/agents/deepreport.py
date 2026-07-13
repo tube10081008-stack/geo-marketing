@@ -64,7 +64,28 @@ def _judge(provider, meter, text: str) -> float:
     return min(1.0, float(m.group())) if m else 0.5
 
 
-def _gen_section(provider, meter, title, persona, ctx, refine_from=None):
+def _stub_section(title, persona, card):
+    """무키(stub) 환경의 결정적 섹션 — 프롬프트 에코 금지, 초안 기반 데모 텍스트."""
+    from .personas import _draft
+
+    if persona:
+        action, _mids = _draft(persona, card)
+        return f"(데모) {action}"
+    if title == "요약":
+        return (f"(데모) 현재 베이스라인: {_card_summary(card)} "
+                f"(종합등급 {card.get('overall_data_grade')}). "
+                "아래에 획득·전환·유지 초안 플랜과 측정 체크리스트를 정리했습니다.")
+    if title == "이달의 포커스":
+        return ("(데모) 이달의 포커스: 리뷰 자산 확대. 리뷰 개수·품질이 노출순위를 좌우하고[M15] "
+                "평점 상승은 매출 방향성 근거가 있으므로[M11], 만족 고객 대상 영수증 리뷰 요청 "
+                "루틴(주 목표: 리뷰 +20%)부터 시작하세요.")
+    return ("(데모) 주간 측정: 평점·리뷰수(네이버 플레이스), 월고객수·객단가(POS), "
+            "재방문율·단골비중(멤버십/장부). 각 액션은 시행 전 2주 베이스라인 대비 실측 A/B로 판단합니다.")
+
+
+def _gen_section(provider, meter, title, persona, ctx, refine_from=None, card=None):
+    if provider.name == "stub":
+        return _stub_section(title, persona, card or {})
     if persona:
         label = f"{PERSONA_META[persona]['emoji']} {PERSONA_META[persona]['name']}"
         role = f"'{label}' 담당 에이전트"
@@ -81,11 +102,11 @@ def _gen_section(provider, meter, title, persona, ctx, refine_from=None):
     return text or f"({title} 생성 실패 — 재시도 필요)"
 
 
-def _search_focus(provider, meter, ctx, log: dict):
+def _search_focus(provider, meter, ctx, log: dict, card=None):
     """딥 티어: '이달의 포커스'를 AB-MCTS로 탐색(treequest 설치 시), 아니면 best-of-3."""
     def generate(parent):
         text = _gen_section(provider, meter, "이달의 포커스", None, ctx,
-                            refine_from=parent["text"] if parent else None)
+                            refine_from=parent["text"] if parent else None, card=card)
         return {"text": text}, _judge(provider, meter, text)
 
     try:
@@ -119,11 +140,14 @@ def run_report(report_id: int):
 
         parts = [f"# {report.merchant.name} — 🐡 Fugu 딥리포트",
                  f"_{timezone.now():%Y-%m-%d} · 데이터등급 {card['overall_data_grade']} · 티어 {report.tier}_"]
+        if provider.name == "stub":
+            parts.append("\n> ⚠️ **데모 모드** — 서버에 GEMINI_API_KEY가 설정되지 않아 "
+                         "결정적 초안으로 생성했습니다(무과금). 키 설정 후 다시 생성하세요.")
         for key, title, persona in SECTIONS:
             if key == "focus" and report.tier == DeepReport.Tier.DEEP:
-                body = _search_focus(provider, meter, ctx, log)
+                body = _search_focus(provider, meter, ctx, log, card=card)
             else:
-                body = _gen_section(provider, meter, title, persona, ctx)
+                body = _gen_section(provider, meter, title, persona, ctx, card=card)
             parts.append(f"\n## {title}\n{body}")
         parts.append("\n---\n_근거 수치는 원 연구 맥락 기준의 방향성 지침이며, "
                      "효과는 이 가게의 실측 A/B로 검증합니다. 데모(stub) 생성분은 무과금._")
