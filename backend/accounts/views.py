@@ -57,6 +57,9 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from agents.llm import get_provider
+
         u = request.user
         return Response({"username": u.username, "email": u.email,
-                         "balance": get_wallet(u).balance})
+                         "balance": get_wallet(u).balance,
+                         "provider": get_provider().name})

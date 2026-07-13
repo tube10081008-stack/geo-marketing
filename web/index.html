@@ -539,7 +539,17 @@ function setEngine(name){
   const dot = $('#engDot'), t = $('#engName');
   if (name === 'gemini') { dot.className='eng-dot live'; t.textContent='Gemini 라이브'; }
   else if (name === 'anthropic') { dot.className='eng-dot live'; t.textContent='Claude 라이브'; }
-  else { dot.className='eng-dot stub'; t.textContent='데모(무과금)'; }
+  else if (name) { dot.className='eng-dot stub'; t.textContent='데모(무과금)'; }
+  else { dot.className='eng-dot'; t.textContent='대기'; }
+}
+/* 접속 즉시 엔진 상태 표시(메시지 전송 전에도). 로그인=Render health, 게스트=Vercel health */
+function probeEngine(){
+  if (auth) {
+    api('/health/').then(h => setEngine(h.provider)).catch(()=>{});
+  } else {
+    fetch('/api/health').then(r => r.ok ? r.json() : null)
+      .then(h => { if (h && h.provider) setEngine(h.provider); }).catch(()=>{});
+  }
 }
 /* 포인트 지갑: 가입 보너스에서 실사용 토큰 원가만큼 차감(젠스파크식). 게스트/데모는 무과금 */
 function setBalance(b){
@@ -653,7 +663,7 @@ async function loadWorkspace(){
   $('#authBtn').textContent = '로그아웃';
   window._ctx = { merchant:'내 가게', fields:{} };
   try {
-    api('/auth/me/').then(me => setBalance(me.balance)).catch(()=>{});
+    api('/auth/me/').then(me => { setBalance(me.balance); setEngine(me.provider); }).catch(()=>{});
     const list = await api('/onboarding/merchants/');
     msgs.innerHTML = ''; history = [];
     if (list.length) {
@@ -756,6 +766,8 @@ $('#reset').addEventListener('click', () => { localStorage.removeItem(SKEY); loc
   // 로그인 세션이 있으면 서버 워크스페이스 복원(게스트 저장분은 무시)
   try { auth = JSON.parse(localStorage.getItem(AKEY) || 'null'); } catch(e){ auth = null; }
   if (auth && auth.token) { loadWorkspace(); return; }
+
+  probeEngine();  // 게스트: 접속 즉시 Vercel 엔진 상태 표시(메시지 전 '대기' 오해 방지)
 
   let s; try { s = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch(e){}
   if (s && s.ctx) {

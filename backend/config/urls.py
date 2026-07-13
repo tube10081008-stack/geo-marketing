@@ -5,8 +5,11 @@ from django.urls import include, path
 
 
 def health(request):
-    """Render 헬스체크용 — 무인증 200."""
-    return JsonResponse({"status": "ok", "service": "geo-marketing-api"})
+    """Render 헬스체크용 — 무인증 200. provider로 라이브/데모 여부 즉시 확인(키값은 미노출)."""
+    from agents.llm import get_provider
+
+    return JsonResponse({"status": "ok", "service": "geo-marketing-api",
+                         "provider": get_provider().name})
 
 
 urlpatterns = [
