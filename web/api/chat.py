@@ -25,11 +25,18 @@ CORPUS = {
             ("M13", "부정 리뷰가 더 무겁다→신속대응", "Chevalier & Mayzlin 2006"),
             ("M10", "충성≠수익 — 수익성 세그먼트 우선", "Reinartz & Kumar 2002"),
             ("M16", "(반론) NPS 우월성 재현 실패 — 보조지표로만", "Keiningham et al. 2007")],
+    # 🧾 세무(Cora) — 법령·국세청 근거(2026-07 교차검증), 세무대리 아님
+    "cora": [("T1", "부가세 확정신고: 일반 연2회(7/25·익년1/25)·간이 연1회(익년1/25)", "부가가치세법 §48·§49"),
+             ("T2", "간이과세 기준: 직전연도 공급대가 1억400만원 미만(2024.7.~), 4,800만원 미만 납부면제", "부가세법 시행령 §109(2026 확인)"),
+             ("T3", "종합소득세 신고: 다음해 5/1~5/31(성실신고확인 대상 6/30)", "소득세법 §70·§70의2"),
+             ("T6", "노란우산공제 소득공제 — 소득구간별 연 최대 600만원(2025년 납입분부터)", "조특법 §86의3(2026 확인)"),
+             ("T7", "신용카드·현금영수증 발행세액공제 1.3%, 연 1,000만원 한도(2026.12.31.까지)", "부가세법 §46(2026 확인)")],
 }
 PERSONA_META = {
     "acq": ("🎣 획득", "신규유입·노출·리뷰수"),
     "cvr": ("💳 전환", "전환율·객단가·평점"),
     "ret": ("🔁 유지", "재방문율·LTV·NPS"),
+    "cora": ("🧾 코라 Cora", "절세·세무 일정·증빙 준비"),
 }
 KEYWORDS = {
     "acq": ["신규", "노출", "리뷰", "유입", "광고", "검색", "플레이스", "손님", "홍보", "인스타", "sns"],
@@ -114,11 +121,18 @@ def _card_summary(fields):
             f"재방문 {g('revisit_rate')}%, 단골비중 {g('regular_ratio')}%")
 
 
+_CORA_RE = re.compile(
+    r"코라|cora|세금|세무|부가세|부가가치세|종소세|종합소득세|절세|세액공제|소득공제|"
+    r"세금계산서|현금영수증|기장|장부|간이과세|일반과세|노란우산|가산세|원천세|홈택스|필요경비|증빙", re.I)
+
+
 def route_chat(message, fields, forced, provider, meter):
     """깨울 페르소나 리스트(1~2). 여러 영역에 걸친 질문이면 협업(2인)."""
-    if forced in ("acq", "cvr", "ret"):
+    if forced in ("acq", "cvr", "ret", "cora"):
         return [forced]
     low = (message or "").lower()
+    if _CORA_RE.search(low):
+        return ["cora"]  # 세무 질문은 코라 단독
     scores = {p: sum(1 for kw in kws if kw in low) for p, kws in KEYWORDS.items()}
     ranked = [p for p in sorted(scores, key=lambda x: scores[x], reverse=True) if scores[p] > 0]
     if len(ranked) >= 2:
@@ -173,6 +187,15 @@ def extract_updates(message):
 def _system(persona, merchant, fields, collab=None):
     label, kpi = PERSONA_META[persona]
     cites = "\n".join(f"- [{m}] {c} ({s})" for m, c, s in CORPUS[persona])
+    if persona == "cora":
+        return (f"너는 🧾 코라(Cora), 소상공인 '{merchant}'의 세무 가이드 에이전트다.\n"
+                "역할: 한국 세법 개념 설명·세무 일정 안내·절세 제도 소개·신고 전 준비 체크리스트.\n"
+                f"검증된 근거(관련 시 반드시 [T#] 인용):\n{cites}\n"
+                "[법적 경계 — 세무사법 준수] 너는 세무사가 아니다. 세무대리(신고 대행·개별 세액 확정·불복)는 "
+                "할 수 없으며 하겠다고 말해서도 안 된다. 확정 판단은 세무사(무료 '마을세무사' 포함)나 "
+                "국세청 126 상담을 안내하라.\n"
+                "[개정 주의] 세법은 매년 바뀐다. 수치·기한엔 기준연도를 붙이고, 근거에 없는 수치는 "
+                "'홈택스/세무사 확인 필요'라고 명시하라. 마케팅 질문은 획득·전환·유지 팀으로 안내. 2~5문장.")
     others = ", ".join(PERSONA_META[p][0] for p in ("acq", "cvr", "ret") if p != persona)
     base = (f"너는 소상공인 '{merchant}'의 마케팅 {label} 담당 에이전트다. 담당 KPI: {kpi}.\n"
             f"베이스라인: {_card_summary(fields)}.\n"

@@ -46,6 +46,12 @@ _INTENT_RE = re.compile(r"싶|려면|할까|목표|어떻게|되고 싶")
 _FUGU_RE = re.compile(r"복어|fugu|후구", re.I)
 _REPORT_RE = re.compile(r"리포트|보고서|report", re.I)
 
+# 세무 질문 → 🧾 코라(Cora) 단독 응답(마케팅 협업 미발동)
+_CORA_RE = re.compile(
+    r"코라|cora|세금|세무|부가세|부가가치세|종소세|종합소득세|절세|세액공제|소득공제|"
+    r"세금계산서|현금영수증|기장|장부|간이과세|일반과세|노란우산|가산세|원천세|"
+    r"4대\s*보험|홈택스|필요경비|증빙", re.I)
+
 # 유령 약속("복어님께 전달하겠다") 대화 붕괴 방지 — 모든 페르소나 공통 규칙
 _HONESTY = (
     "\n[정직 규칙] 너는 이 답변 밖에서 어떤 행동도 실행할 수 없다. "
@@ -72,12 +78,15 @@ def extract_updates(message):
 
 
 def route(message, forced, provider, meter):
-    if forced in ("acq", "cvr", "ret"):
+    if forced in ("acq", "cvr", "ret", "cora"):
         return [forced]
     low = (message or "").lower()
     # 복어 직접 호명, 또는 짧은 리포트 상태성 질문("리포트 조회 가능해?") → 오케스트레이터
     if _FUGU_RE.search(low) or (_REPORT_RE.search(low) and len(message) < 40):
         return ["fugu"]
+    # 세무 질문 → 코라 단독(잘못된 마케팅 협업·이중과금 방지)
+    if _CORA_RE.search(low):
+        return ["cora"]
     scores = {p: sum(1 for kw in kws if kw in low) for p, kws in KEYWORDS.items()}
     ranked = [p for p in sorted(scores, key=lambda x: scores[x], reverse=True) if scores[p] > 0]
     if len(ranked) >= 2:
@@ -104,10 +113,23 @@ def _label(persona):
 
 def _system(persona, merchant, card, collab=None, summary="", report_note=""):
     where = f"{merchant.get_industry_display()}, {merchant.location}"
-    if persona == "fugu":
+    if persona == "cora":
+        # 세무 가이드 — 개념·일정·절세제도·준비까지만. 세무대리 금지(세무사법 준수)
+        cites = "\n".join(f"- [{e.mid}] {e.claim} ({e.cite})" for e in retrieve("cora"))
+        base = (f"너는 🧾 코라(Cora), 소상공인 '{merchant.name}'({where})의 세무 가이드 에이전트다.\n"
+                "역할: 한국 세법·상법의 개념 설명, 세무 일정 안내, 절세 제도 소개, 신고 전 준비 체크리스트.\n"
+                f"검증된 근거(관련 시 반드시 [T#] 인용):\n{cites}\n"
+                f"참고 베이스라인: {_card_summary(card)}.\n"
+                "[법적 경계 — 세무사법 준수] 너는 세무사가 아니다. 세무대리(신고 대행, 개별 세액 확정 계산, "
+                "불복 대리)는 할 수 없으며 하겠다고 말해서도 안 된다. 개별 사안의 확정 판단이 필요하면 "
+                "세무사(전국 무료 '마을세무사' 제도 포함)나 국세청 상담센터(126)를 안내하라.\n"
+                "[개정 주의] 세법은 매년 바뀐다. 수치·기한에는 근거의 기준연도를 붙이고, 근거 목록에 없는 "
+                "수치는 단정하지 말고 '홈택스/세무사 확인 필요'라고 명시하라.\n"
+                "마케팅 질문이면 🐡 복어 팀(획득·전환·유지)으로 안내하라. 사장님 눈높이로 2~5문장.")
+    elif persona == "fugu":
         # 오케스트레이터 본인 — 리포트·팀 상태 등 메타 질문에 직접 답한다
         base = (f"너는 🐡 복어(Fugu), 소상공인 '{merchant.name}'({where})의 마케팅 오케스트레이터다.\n"
-                f"🎣 획득 · 💳 전환 · 🔁 유지 3인 에이전트 팀을 지휘한다.\n"
+                f"🎣 획득 · 💳 전환 · 🔁 유지 3인 마케팅 팀을 지휘하고, 🧾 세무 가이드 코라(Cora)와 협업한다.\n"
                 f"베이스라인: {_card_summary(card)}.\n"
                 + (f"[최신 딥리포트(발췌)]\n{report_note}\n" if report_note
                    else "완료된 딥리포트가 아직 없다 — 있는 것처럼 말하지 마라.\n")
@@ -123,7 +145,7 @@ def _system(persona, merchant, card, collab=None, summary="", report_note=""):
                 f"오케스트레이터는 🐡 복어(Fugu)이며 너는 복어가 이끄는 획득·전환·유지 3인 팀의 일원이다.\n"
                 f"베이스라인: {_card_summary(card)}.\n"
                 f"근거 코퍼스(관련 시 반드시 [M#] 인용):\n{cites}\n"
-                f"네 영역 밖이면 {others} 에이전트에게 넘기라고 안내하라.\n"
+                f"네 영역 밖이면 {others} 에이전트에게, 세금·세무 질문이면 🧾 코라(Cora)에게 넘기라고 안내하라.\n"
                 "사장님과 대화하듯 간결하고 실행가능하게 답하라. 2~4문장. 출처를 댈 수 없는 단정은 금지.")
         if report_note:
             base += f"\n\n[최신 딥리포트(발췌) — 사장님이 언급한 리포트]\n{report_note}"

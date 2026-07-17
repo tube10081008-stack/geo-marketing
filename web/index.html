@@ -215,7 +215,7 @@
     <div class="page-head" id="overview">
       <div>
         <h1 id="pageTitle">마케팅 워크스페이스</h1>
-        <p>SCI 논문 코퍼스를 인용하는 획득 · 전환 · 유지 에이전트</p>
+        <p>SCI 논문 코퍼스를 인용하는 획득 · 전환 · 유지 에이전트 + 세무 가이드 코라(Cora)</p>
       </div>
     </div>
 
@@ -241,6 +241,7 @@
             <div class="tab" data-p="acq">획득</div>
             <div class="tab" data-p="cvr">전환</div>
             <div class="tab" data-p="ret">유지</div>
+            <div class="tab" data-p="cora">🧾 세무</div>
           </div>
           <span class="microlabel">Fugu routes to the right specialist</span>
         </div>
@@ -361,6 +362,7 @@ const PERSONA = {
   acq:{name:'획득', color:'var(--acq)', hex:'#2a78d6'},
   cvr:{name:'전환', color:'var(--cvr)', hex:'#1baf7a'},
   ret:{name:'유지', color:'var(--ret)', hex:'#4a3aa7'},
+  cora:{name:'세무', color:'#b45309', hex:'#b45309'},
 };
 const GRADE_COLOR = {A:'#008300', B:'#65A30D', C:'#D97706', D:'#e34948'};
 const FIELD_LABELS = {avg_rating:'평점', review_count:'리뷰수', place_clicks:'플레이스클릭',
@@ -779,7 +781,7 @@ $('#reset').addEventListener('click', () => { localStorage.removeItem(SKEY); loc
   }
   if (!msgs.children.length) {
     agentBubble('', '🐡 복어 Fugu · 오케스트레이터',
-      '안녕하세요, 마케팅을 도와드릴 복어(Fugu)입니다. 바로 질문하셔도 되고, 좌측 "데이터 입력"으로 가게 숫자를 넣으면 맞춤 KPI와 액션을 받을 수 있어요. 가입하면 무료 10,000P를 드리고, 모든 대화가 서버에 저장돼 어느 기기에서든 이어집니다.\n예) "신규 손님을 늘리려면?", "재방문율을 어떻게 올리죠?"', []);
+      '안녕하세요, 마케팅을 도와드릴 복어(Fugu)입니다. 바로 질문하셔도 되고, 좌측 "데이터 입력"으로 가게 숫자를 넣으면 맞춤 KPI와 액션을 받을 수 있어요. 세금이 궁금하면 세무 가이드 코라(Cora)가 답해드립니다. 가입하면 무료 10,000P를 드리고, 모든 대화가 서버에 저장돼 어느 기기에서든 이어집니다.\n예) "신규 손님을 늘리려면?", "부가세 신고 언제까지야?"', []);
     saveSession();
   }
 })();
