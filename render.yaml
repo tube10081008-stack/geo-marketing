@@ -1,0 +1,43 @@
+# Render.com 배포 청사진 (Blueprint)
+# 대상: 지오(마케팅 오케스트라) 백엔드 — 계정·영속·딥리포트 API
+#
+# 이 저장소는 구 모노레포(tube10081008-stack/Urge-surfing)의 marketing-orchestra/
+# 폴더를 독립 저장소로 분리한 것입니다. 경로가 한 단계 위로 올라오면서
+# rootDir 가 'marketing-orchestra/backend' → 'backend' 로 조정되었습니다.
+
+services:
+  - type: web
+    name: geo-marketing-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    branch: claude/multi-project-bottleneck-analysis-ppa8qq
+    buildCommand: "pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate"
+    startCommand: "gunicorn config.wsgi"
+    healthCheckPath: /api/v1/health/
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: ".onrender.com,localhost,127.0.0.1"
+      - key: DJANGO_CSRF_TRUSTED_ORIGINS
+        value: "https://geo-marketing-api.onrender.com"
+      - key: DJANGO_SECURE_SSL_REDIRECT
+        value: "False"
+      # ※ Vercel 프런트를 이 저장소용으로 재배포하면 새 도메인으로 갱신하세요.
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://urge-surfing.vercel.app"
+      - key: GEMINI_API_KEY
+        sync: false               # 대시보드에서 직접 입력(코드/저장소 미포함)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: geo-marketing-db
+          property: connectionString
+
+databases:
+  - name: geo-marketing-db
+    plan: free
