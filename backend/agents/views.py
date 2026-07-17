@@ -113,8 +113,18 @@ class ChatView(APIView):
             merchant.messages.exclude(role=ChatMessage.Role.SYSTEM)
             .order_by("-pk")[:MAX_HISTORY_MESSAGES])[::-1]
         history = [{"role": m.role, "text": m.text} for m in recent]
+
+        # 최신 완료 딥리포트 발췌 — 에이전트가 실제 리포트를 참조·인용할 수 있게
+        report_note = ""
+        last_report = merchant.reports.filter(status=DeepReport.Status.DONE).first()
+        if last_report:
+            when = (last_report.finished_at.strftime("%Y-%m-%d")
+                    if last_report.finished_at else "")
+            report_note = (f"리포트 #{last_report.pk} · {when} · 티어 {last_report.tier}\n"
+                           + last_report.content_md[:700])
+
         result = run_chat(merchant, history, message, forced,
-                          provider=provider, meter=meter)
+                          provider=provider, meter=meter, report_note=report_note)
 
         # 영속: 사용자 메시지 + (갱신 시)베이스라인 DB 반영 + 시스템 + 에이전트 답변들
         ChatMessage.objects.create(merchant=merchant, role="user", text=message)

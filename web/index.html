@@ -574,7 +574,7 @@ function meBubble(text){
 }
 function agentBubble(pKey, who, text, cites){
   const m = PERSONA[pKey] || {name:'🐡', color:'var(--ink)'};
-  const initial = pKey ? m.name[0] : '🐡';
+  const initial = (pKey && PERSONA[pKey]) ? m.name[0] : '🐡';  // fugu 등 미등록 키는 🐡 통째로
   const r=document.createElement('div'); r.className='m-row';
   const chips=(cites&&cites.length)?`<div class="cites" style="margin-top:7px">${cites.map(c=>`<span class="cite">${c}</span>`).join('')}</div>`:'';
   r.innerHTML=`<div class="avatar" style="background:${m.color}">${esc(initial)}</div>

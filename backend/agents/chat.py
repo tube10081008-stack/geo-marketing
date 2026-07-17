@@ -42,6 +42,16 @@ def _card_summary(card):
 # 목표/희망 발화("평점을 4.5로 올리고 싶어요")를 사실로 오인하지 않기 위한 의도어 가드(REVIEW §2)
 _INTENT_RE = re.compile(r"싶|려면|할까|목표|어떻게|되고 싶")
 
+# 복어 직접 호명 / 리포트 상태성 질문 → 오케스트레이터가 직접 답한다
+_FUGU_RE = re.compile(r"복어|fugu|후구", re.I)
+_REPORT_RE = re.compile(r"리포트|보고서|report", re.I)
+
+# 유령 약속("복어님께 전달하겠다") 대화 붕괴 방지 — 모든 페르소나 공통 규칙
+_HONESTY = (
+    "\n[정직 규칙] 너는 이 답변 밖에서 어떤 행동도 실행할 수 없다. "
+    "'복어님께 전달하겠다', '곧 공유될 예정' 같은 실행되지 않는 백그라운드 작업을 약속하지 마라. "
+    "다른 에이전트나 복어의 발화를 지어내 끼워 넣지 마라. 확인할 수 없는 것은 모른다고 답하라.")
+
 # 비용·공격 방어(REVIEW §2): 서버가 신뢰 경계 — 프런트가 보낸 값은 절단한다
 MAX_MESSAGE_CHARS = 1000
 MAX_HISTORY_MESSAGES = 12
@@ -65,10 +75,14 @@ def route(message, forced, provider, meter):
     if forced in ("acq", "cvr", "ret"):
         return [forced]
     low = (message or "").lower()
+    # 복어 직접 호명, 또는 짧은 리포트 상태성 질문("리포트 조회 가능해?") → 오케스트레이터
+    if _FUGU_RE.search(low) or (_REPORT_RE.search(low) and len(message) < 40):
+        return ["fugu"]
     scores = {p: sum(1 for kw in kws if kw in low) for p, kws in KEYWORDS.items()}
     ranked = [p for p in sorted(scores, key=lambda x: scores[x], reverse=True) if scores[p] > 0]
     if len(ranked) >= 2:
-        return ranked[:2]
+        # "됐어?" 같은 짧은 후속 발화엔 2인 협업(=2배 과금)을 발동하지 않는다
+        return ranked[:2] if len(message) >= 24 else ranked[:1]
     if ranked:
         return ranked
     if provider.name != "stub":
@@ -79,7 +93,7 @@ def route(message, forced, provider, meter):
         meter.add(usage)
         picks = [p for p in ("acq", "cvr", "ret") if p in text]
         if picks:
-            return picks[:2]
+            return picks[:2] if len(message) >= 24 else picks[:1]
     return ["cvr"]
 
 
@@ -88,31 +102,51 @@ def _label(persona):
     return f"{meta['emoji']} {meta['name']}", meta["kpi"]
 
 
-def _system(persona, merchant_name, card, collab=None, summary=""):
-    label, kpi = _label(persona)
-    cites = "\n".join(f"- [{e.mid}] {e.claim} ({e.cite})" for e in retrieve(persona))
-    others = ", ".join(f"{PERSONA_META[p]['emoji']} {PERSONA_META[p]['name']}"
-                       for p in ("acq", "cvr", "ret") if p != persona)
-    base = (f"너는 소상공인 '{merchant_name}'의 마케팅 {label} 담당 에이전트다. 담당 KPI: {kpi}.\n"
-            f"오케스트레이터는 🐡 복어(Fugu)이며 너는 복어가 이끄는 획득·전환·유지 3인 팀의 일원이다.\n"
-            f"베이스라인: {_card_summary(card)}.\n"
-            f"근거 코퍼스(관련 시 반드시 [M#] 인용):\n{cites}\n"
-            f"네 영역 밖이면 {others} 에이전트에게 넘기라고 안내하라.\n"
-            "사장님과 대화하듯 간결하고 실행가능하게 답하라. 2~4문장. 출처를 댈 수 없는 단정은 금지.")
+def _system(persona, merchant, card, collab=None, summary="", report_note=""):
+    where = f"{merchant.get_industry_display()}, {merchant.location}"
+    if persona == "fugu":
+        # 오케스트레이터 본인 — 리포트·팀 상태 등 메타 질문에 직접 답한다
+        base = (f"너는 🐡 복어(Fugu), 소상공인 '{merchant.name}'({where})의 마케팅 오케스트레이터다.\n"
+                f"🎣 획득 · 💳 전환 · 🔁 유지 3인 에이전트 팀을 지휘한다.\n"
+                f"베이스라인: {_card_summary(card)}.\n"
+                + (f"[최신 딥리포트(발췌)]\n{report_note}\n" if report_note
+                   else "완료된 딥리포트가 아직 없다 — 있는 것처럼 말하지 마라.\n")
+                + "사장님 질문에 종합 관점으로 지금 바로 답하고, 실행 디테일이 필요하면 "
+                  "담당 에이전트를 지목해 그쪽에 물어보시라고 안내하라. 2~5문장, 관련 시 [M#] 인용.")
+    else:
+        label, kpi = _label(persona)
+        cites = "\n".join(f"- [{e.mid}] {e.claim} ({e.cite})" for e in retrieve(persona))
+        others = ", ".join(f"{PERSONA_META[p]['emoji']} {PERSONA_META[p]['name']}"
+                           for p in ("acq", "cvr", "ret") if p != persona)
+        base = (f"너는 소상공인 '{merchant.name}'({where})의 마케팅 {label} 담당 에이전트다. 담당 KPI: {kpi}.\n"
+                f"업종이 '{merchant.get_industry_display()}'임을 전제로 답하라 — 상호명으로 업종을 추측하지 마라.\n"
+                f"오케스트레이터는 🐡 복어(Fugu)이며 너는 복어가 이끄는 획득·전환·유지 3인 팀의 일원이다.\n"
+                f"베이스라인: {_card_summary(card)}.\n"
+                f"근거 코퍼스(관련 시 반드시 [M#] 인용):\n{cites}\n"
+                f"네 영역 밖이면 {others} 에이전트에게 넘기라고 안내하라.\n"
+                "사장님과 대화하듯 간결하고 실행가능하게 답하라. 2~4문장. 출처를 댈 수 없는 단정은 금지.")
+        if report_note:
+            base += f"\n\n[최신 딥리포트(발췌) — 사장님이 언급한 리포트]\n{report_note}"
+    base += _HONESTY
     if summary:
         base += f"\n\n[장기기억 — 이전 대화 요약]\n{summary[:SUMMARY_MAX_CHARS]}"
     if collab:
         base += (f"\n\n[협업] 동료 에이전트가 먼저 답했다:\n\"{collab}\"\n"
-                 "중복은 피하고 네 전문영역 관점에서 보완·연결하라(시너지 한 줄).")
+                 "동료 답변을 재인용·복사·요약반복하지 마라. 네 전문영역에서 보탤 내용만 1~3문장. "
+                 "보탤 것이 없으면 '덧붙일 내용은 없습니다' 한 문장으로만 끝내라.")
     return base
 
 
-def run_chat(merchant, history, message, forced=None, provider=None, meter=None):
+def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
+             report_note=""):
     card = merchant.baseline_card()
     provider = provider or get_provider()
     meter = meter if meter is not None else Meter()
     message = (message or "")[:MAX_MESSAGE_CHARS]
     personas = route(message, forced, provider, meter)
+
+    # 리포트 발췌는 관련 턴에만 주입(토큰 절약): 복어 턴 or 사장님이 리포트를 언급했을 때
+    mentions_report = bool(_REPORT_RE.search(message))
 
     trimmed = [
         {"role": h.get("role"), "text": (h.get("text") or "")[:MAX_MESSAGE_CHARS]}
@@ -122,12 +156,14 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None)
     turns, collab = [], None
     for p in personas:
         label, kpi = _label(p)
-        system = _system(p, merchant.name, card, collab, summary=merchant.chat_summary)
+        note = report_note if (p == "fugu" or mentions_report) else ""
+        system = _system(p, merchant, card, collab,
+                         summary=merchant.chat_summary, report_note=note)
         reply, usage = provider.chat(system=system, messages=messages)
         meter.add(usage)
         turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,
                       "citations": [e.mid for e in retrieve(p)]})
-        collab = f"{label}: {reply}"
+        collab = f"{label}: {reply}"[:600]  # 다음 페르소나 참조용 — 길이 상한(비용 방어)
 
     return {
         "turns": turns,
