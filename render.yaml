@@ -11,7 +11,7 @@ services:
     runtime: python
     plan: free
     rootDir: backend
-    branch: claude/multi-project-bottleneck-analysis-ppa8qq
+    branch: main
     buildCommand: "pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate"
     startCommand: "gunicorn config.wsgi"
     healthCheckPath: /api/v1/health/
@@ -28,9 +28,9 @@ services:
         value: "https://geo-marketing-api.onrender.com"
       - key: DJANGO_SECURE_SSL_REDIRECT
         value: "False"
-      # ※ Vercel 프런트를 이 저장소용으로 재배포하면 새 도메인으로 갱신하세요.
+      # ※ 재연결 시 Vercel 프런트 도메인을 대시보드에서 직접 입력(코드 수정 불필요).
       - key: CORS_ALLOWED_ORIGINS
-        value: "https://urge-surfing.vercel.app"
+        sync: false
       - key: GEMINI_API_KEY
         sync: false               # 대시보드에서 직접 입력(코드/저장소 미포함)
       - key: DATABASE_URL
