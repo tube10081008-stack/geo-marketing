@@ -234,6 +234,57 @@ class ReportDetailView(APIView):
         return Response(_report_payload(report))
 
 
+class CheckinView(APIView):
+    """주간 체크인 — 30초 측정 수집기(루프 ③). 마지막 측정 7일 경과 시 due.
+
+    묻는 지표는 사장님이 즉시 아는 것만: 평점·리뷰수(플레이스 화면), 월매출(장부).
+    """
+
+    permission_classes = [IsAuthenticated]
+    FIELDS = ("avg_rating", "review_count", "monthly_revenue")
+    DUE_DAYS = 7
+
+    def get(self, request):
+        from django.utils import timezone
+
+        merchant = _merchant(request, request.query_params.get("merchant_id"))
+        last = merchant.snapshots.last()
+        days = (timezone.now() - last.created_at).days if last else None
+        return Response({
+            "due": last is None or days >= self.DUE_DAYS,
+            "days_since": days,
+            "last_at": last.created_at.isoformat() if last else None,
+        })
+
+    def post(self, request):
+        merchant = _merchant(request, request.data.get("merchant_id"))
+        recorded = {}
+        for f in self.FIELDS:
+            v = request.data.get(f)
+            if v in (None, ""):
+                continue
+            if record_snapshot(merchant, f, v, source="checkin") is None:
+                continue  # 숫자 아님 → 무시
+            recorded[f] = v
+        if not recorded:
+            return Response({"detail": "기록할 숫자가 없습니다."}, status=400)
+
+        # 베이스라인(현재값)도 동기화
+        _apply_updates(merchant, {k: str(v) for k, v in recorded.items()
+                                  if k in _UPDATE_MAP})
+        if "monthly_revenue" in recorded:
+            try:
+                merchant.monthly_revenue = int(
+                    str(recorded["monthly_revenue"]).replace(",", ""))
+                merchant.save(update_fields=["monthly_revenue"])
+            except ValueError:
+                pass
+        ChatMessage.objects.create(
+            merchant=merchant, role="system",
+            text="주간 체크인 기록: " + ", ".join(f"{k} {v}" for k, v in recorded.items()))
+        return Response({"recorded": recorded})
+
+
 def _action_payload(a: Action) -> dict:
     return {
         "id": a.pk, "persona": a.persona, "title": a.title,

@@ -102,6 +102,10 @@
   .act-ctl{display:flex; gap:8px; margin-top:10px;}
   .btn.tiny{width:auto; padding:6px 12px; font-size:12px;}
   .delta{margin-top:8px; font-size:12.5px; font-weight:700; color:var(--cvr);}
+  #checkinBar{flex-wrap:wrap;}
+  .ck-fields{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+  .ck-fields input{padding:8px 10px; border:1px solid var(--line); border-radius:8px;
+    width:128px; font:inherit; font-size:12.5px; background:var(--card); color:inherit;}
   .cite{font-size:10px; font-weight:800; padding:2.5px 7px; border-radius:6px;
         background:var(--accent-bg); color:var(--accent-d); letter-spacing:.02em;}
   .footnote{margin-top:10px; font-size:11.5px; color:var(--faint); line-height:1.5;}
@@ -225,6 +229,17 @@
     <div class="banner" id="emptyBanner">
       <span>가게 데이터를 입력하면 KPI와 맞춤 실행 액션이 생성됩니다. 입력 없이 바로 대화도 가능합니다.</span>
       <button class="btn" id="openData2">데이터 입력</button>
+    </div>
+
+    <div class="banner" id="checkinBar" hidden>
+      <span>📏 <b>주간 체크인 (30초)</b> — 최근 측정이 오래됐어요. 지금 숫자만 적으면 추세가 쌓여 실행 액션의 효과를 잴 수 있어요.</span>
+      <div class="ck-fields">
+        <input id="ckRating" placeholder="평점 (예: 4.8)" inputmode="decimal" />
+        <input id="ckReviews" placeholder="리뷰수 (예: 78)" inputmode="numeric" />
+        <input id="ckRevenue" placeholder="월매출 원 (선택)" inputmode="numeric" />
+        <button class="btn tiny" id="ckSave">기록</button>
+        <button class="btn tiny ghost" id="ckSkip">다음에</button>
+      </div>
     </div>
 
     <div class="kpis" id="kpis" hidden></div>
@@ -405,6 +420,11 @@ const msgs = $('#msgs'), msgInput = $('#msg'), sendBtn = $('#send'), tabs = $('#
 let persona = '', history = [];
 
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+/* 에이전트 답변용 경량 마크다운: **볼드**·헤더·불릿만 (이스케이프 후 변환 — XSS 안전) */
+const mdLite = s => esc(s)
+  .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+  .replace(/(^|\n)#{1,4}\s+(.+)/g, '$1<b>$2</b>')
+  .replace(/(^|\n)\s*[*-]\s+/g, '$1• ');
 const fmt = v => (v == null || v === '') ? '—' : String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
 /* ── 모달 ── */
@@ -516,7 +536,7 @@ function applyAdvice(d) {
     return `<div class="act">
       <div class="top"><span class="pill" style="background:${m.color}">${esc(m.name||a.label)}</span>
         <span class="kpi-tag">${esc(a.kpi)}</span></div>
-      <div class="body">${esc(a.action)}</div>
+      <div class="body">${mdLite(a.action)}</div>
       <div class="cites">${(a.citations||[]).map(c=>`<span class="cite">${c}</span>`).join('')}</div>
     </div>`;
   }).join('');
@@ -545,7 +565,7 @@ function renderActions(list){
     return `<div class="act">
       <div class="top"><span class="pill" style="background:${m.color}">${esc(m.name)}</span>
         <span class="kpi-tag">${ACT_ST[a.status]||a.status}${tgt}</span></div>
-      <div class="body">${esc(a.title)}</div>${delta}
+      <div class="body">${mdLite(a.title)}</div>${delta}
       <div class="cites">${(a.citations||[]).map(c=>`<span class="cite">${c}</span>`).join('')}</div>
       ${actionBtns(a.id, a.status)}
     </div>`;
@@ -635,7 +655,7 @@ function agentBubble(pKey, who, text, cites){
   const r=document.createElement('div'); r.className='m-row';
   const chips=(cites&&cites.length)?`<div class="cites" style="margin-top:7px">${cites.map(c=>`<span class="cite">${c}</span>`).join('')}</div>`:'';
   r.innerHTML=`<div class="avatar" style="background:${m.color}">${esc(initial)}</div>
-    <div class="m-wrap"><div class="m-who">${esc(who)}</div><div class="m-body">${esc(text)}</div>${chips}</div>`;
+    <div class="m-wrap"><div class="m-who">${esc(who)}</div><div class="m-body">${mdLite(text)}</div>${chips}</div>`;
   msgs.appendChild(r); msgs.scrollTop=msgs.scrollHeight;
 }
 function sysBubble(text){ const d=document.createElement('div'); d.className='m-sys'; d.textContent=text;
@@ -739,6 +759,10 @@ async function loadWorkspace(){
       $('#emptyBanner').hidden = true;
       renderKpis();
       refreshActions();  // 액션 티켓(조언→실측 루프) 상태판 복원
+      // 주간 체크인: 마지막 측정 7일 경과 시 30초 측정 바 노출
+      api('/agents/checkin/?merchant_id='+mid)
+        .then(s => { if (s.due && !sessionStorage.getItem('ckSkip')) $('#checkinBar').hidden = false; })
+        .catch(()=>{});
       const h = await api(`/agents/history/${mid}/`);
       h.messages.forEach(x => {
         if (x.role === 'user') meBubble(x.text);
@@ -819,6 +843,28 @@ function saveSession(){
     ctx: window._ctx, advice: window._advice, history, chat: msgs.innerHTML })); } catch(e){}
 }
 $('#reset').addEventListener('click', () => { localStorage.removeItem(SKEY); location.reload(); });
+
+/* ── 주간 체크인 제출 ── */
+$('#ckSkip').addEventListener('click', () => {
+  sessionStorage.setItem('ckSkip', '1'); $('#checkinBar').hidden = true;
+});
+$('#ckSave').addEventListener('click', async () => {
+  const body = { merchant_id: mid };
+  const vals = { avg_rating: $('#ckRating').value.trim(),
+                 review_count: $('#ckReviews').value.trim(),
+                 monthly_revenue: $('#ckRevenue').value.replace(/,/g,'').trim() };
+  Object.entries(vals).forEach(([k,v]) => { if (v) body[k] = v; });
+  if (Object.keys(body).length === 1) { toast('숫자를 하나 이상 입력해주세요'); return; }
+  try {
+    const d = await api('/agents/checkin/', {method:'POST', body: JSON.stringify(body)});
+    $('#checkinBar').hidden = true;
+    if (d.recorded.avg_rating) window._ctx.fields.avg_rating = d.recorded.avg_rating;
+    if (d.recorded.review_count) window._ctx.fields.review_count = d.recorded.review_count;
+    renderKpis();
+    sysBubble('주간 체크인 기록 완료 — 추세에 반영됐어요. 진행 중 액션의 실측에도 사용됩니다.');
+    toast('체크인 기록 ✓', 4000);
+  } catch (e) { toast('체크인 실패: ' + e.message, 6000); }
+});
 
 (function init(){
   // 로그인 세션이 있으면 서버 워크스페이스 복원(게스트 저장분은 무시)

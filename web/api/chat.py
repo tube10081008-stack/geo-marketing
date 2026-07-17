@@ -230,7 +230,9 @@ def run_chat(merchant, fields, history, message, forced=None):
     for p in personas:
         label, kpi = PERSONA_META[p]
         system = _system(p, merchant or "내 가게", fields, collab)
-        reply, (i, o) = provider.chat(system, base_contents)
+        # 코라는 체크리스트형 답이 길다 — 잘림 방지로 상한 2배
+        reply, (i, o) = provider.chat(system, base_contents,
+                                      max_tokens=2048 if p == "cora" else 1024)
         meter.add(provider.generator_model, i, o)
         turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,
                       "citations": [m for m, _, _ in CORPUS[p]]})

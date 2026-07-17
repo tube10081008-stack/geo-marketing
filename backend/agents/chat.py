@@ -12,7 +12,7 @@ merchant.baseline_card()를 맥락으로, 복어(Fugu)가 메시지를 적합 �
 import re
 
 from .corpus import retrieve
-from .llm import Meter, get_provider
+from .llm import CHAT_MAX_TOKENS, Meter, get_provider
 from .personas import PERSONA_META
 
 KEYWORDS = {
@@ -187,7 +187,10 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
         system = _system(p, merchant, card, collab,
                          summary=merchant.chat_summary, report_note=note,
                          actions_note=actions_note)
-        reply, usage = provider.chat(system=system, messages=messages)
+        # 코라는 일정·체크리스트형 답이 길다 — 잘림 방지로 상한 2배
+        reply, usage = provider.chat(
+            system=system, messages=messages,
+            max_tokens=CHAT_MAX_TOKENS * 2 if p == "cora" else CHAT_MAX_TOKENS)
         meter.add(usage)
         turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,
                       "citations": [e.mid for e in retrieve(p)]})
