@@ -393,3 +393,99 @@ class DeepReport(models.Model):
 
     def __str__(self):
         return f"{self.merchant.name} · {self.tier} · {self.status}"
+
+
+# 스냅샷·액션 공용 지표 키 (agents.views._UPDATE_MAP과 정합)
+METRIC_CHOICES = [
+    ("avg_rating", "평점"), ("review_count", "리뷰수"), ("place_clicks", "플레이스클릭"),
+    ("aov", "객단가"), ("monthly_customers", "월 고객수"),
+    ("visit_to_purchase_rate", "전환율"), ("revisit_rate", "재방문율"),
+    ("regular_ratio", "단골비중"), ("nps", "NPS"), ("monthly_revenue", "월 매출"),
+]
+
+
+class KpiSnapshot(models.Model):
+    """지표 시계열 — 덮어쓰기 대신 축적. 조언→실측 검증 루프의 기반(전/후 비교 가능).
+
+    소스: intake(데이터 입력 폼) / chat(대화 중 추출) / checkin(주간 체크인, P다음).
+    """
+
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.CASCADE, related_name="snapshots", verbose_name="업체")
+    metric = models.CharField("지표", max_length=32, choices=METRIC_CHOICES)
+    value = models.DecimalField("값", max_digits=14, decimal_places=2)
+    source = models.CharField("출처", max_length=12, default="chat")  # intake|chat|checkin
+    created_at = models.DateTimeField("측정", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "KPI 스냅샷"
+        verbose_name_plural = "KPI 스냅샷"
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["merchant", "metric", "created_at"])]
+
+    def __str__(self):
+        return f"{self.merchant.name} · {self.metric}={self.value} ({self.source})"
+
+
+def record_snapshot(merchant, metric, value, source="chat"):
+    """스냅샷 축적 — 직전 값과 같으면 스킵(중복 방지). 숫자 아니면 무시."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        dv = Decimal(str(value).replace(",", ""))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    last = merchant.snapshots.filter(metric=metric).last()
+    if last and last.value == dv:
+        return last
+    return KpiSnapshot.objects.create(
+        merchant=merchant, metric=metric, value=dv, source=source)
+
+
+class Action(models.Model):
+    """액션 티켓 — 에이전트 조언을 추적 가능한 객체로 (제안→실행→실측 마감).
+
+    시작 시 baseline_value(당시 최신 스냅샷), 완료 시 result_value를 박아
+    전/후 델타가 남는다. 이 레코드가 쌓이면 [M#] 근거의 국내 실측 격상 재료가 된다.
+    """
+
+    class Status(models.TextChoices):
+        PROPOSED = "proposed", "제안됨"
+        ACTIVE = "active", "실행 중"
+        DONE = "done", "완료(실측)"
+        DROPPED = "dropped", "중단"
+
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.CASCADE, related_name="actions", verbose_name="업체")
+    persona = models.CharField("담당", max_length=8)  # acq|cvr|ret
+    title = models.CharField("액션 요약", max_length=300)
+    detail = models.TextField("상세", blank=True, default="")
+    target_metric = models.CharField(
+        "타깃 지표", max_length=32, choices=METRIC_CHOICES, blank=True, default="")
+    citations = models.JSONField("근거 인용", default=list, blank=True)
+    status = models.CharField("상태", max_length=10, choices=Status.choices,
+                              default=Status.PROPOSED)
+    baseline_value = models.DecimalField(
+        "시작 시점 값", max_digits=14, decimal_places=2, null=True, blank=True)
+    result_value = models.DecimalField(
+        "완료 시점 값", max_digits=14, decimal_places=2, null=True, blank=True)
+    started_at = models.DateTimeField("시작", null=True, blank=True)
+    closed_at = models.DateTimeField("마감", null=True, blank=True)
+    created_at = models.DateTimeField("제안", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "액션 티켓"
+        verbose_name_plural = "액션 티켓"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["merchant", "status"])]
+
+    def delta(self):
+        """전/후 변화량(%) — 둘 다 있어야 산출. '신호'이지 '증명'이 아니다."""
+        if self.baseline_value in (None, 0) or self.result_value is None:
+            return None
+        return round(
+            (float(self.result_value) - float(self.baseline_value))
+            / float(self.baseline_value) * 100, 1)
+
+    def __str__(self):
+        return f"{self.merchant.name} · [{self.persona}] {self.title[:30]} ({self.status})"

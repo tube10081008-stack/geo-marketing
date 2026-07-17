@@ -111,7 +111,8 @@ def _label(persona):
     return f"{meta['emoji']} {meta['name']}", meta["kpi"]
 
 
-def _system(persona, merchant, card, collab=None, summary="", report_note=""):
+def _system(persona, merchant, card, collab=None, summary="", report_note="",
+            actions_note=""):
     where = f"{merchant.get_industry_display()}, {merchant.location}"
     if persona == "cora":
         # 세무 가이드 — 개념·일정·절세제도·준비까지만. 세무대리 금지(세무사법 준수)
@@ -149,6 +150,10 @@ def _system(persona, merchant, card, collab=None, summary="", report_note=""):
                 "사장님과 대화하듯 간결하고 실행가능하게 답하라. 2~4문장. 출처를 댈 수 없는 단정은 금지.")
         if report_note:
             base += f"\n\n[최신 딥리포트(발췌) — 사장님이 언급한 리포트]\n{report_note}"
+    if actions_note and persona != "cora":
+        base += (f"\n\n[진행 중 실행안 — 조언→실측 루프]\n{actions_note}\n"
+                 "관련 대화면 진행 상황을 한 번 자연스럽게 확인하고, 타깃 지표의 현재 값을 "
+                 "물어보라(사장님이 숫자를 말하면 자동 기록된다). 억지로 끼워넣지는 마라.")
     base += _HONESTY
     if summary:
         base += f"\n\n[장기기억 — 이전 대화 요약]\n{summary[:SUMMARY_MAX_CHARS]}"
@@ -160,7 +165,7 @@ def _system(persona, merchant, card, collab=None, summary="", report_note=""):
 
 
 def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
-             report_note=""):
+             report_note="", actions_note=""):
     card = merchant.baseline_card()
     provider = provider or get_provider()
     meter = meter if meter is not None else Meter()
@@ -180,7 +185,8 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
         label, kpi = _label(p)
         note = report_note if (p == "fugu" or mentions_report) else ""
         system = _system(p, merchant, card, collab,
-                         summary=merchant.chat_summary, report_note=note)
+                         summary=merchant.chat_summary, report_note=note,
+                         actions_note=actions_note)
         reply, usage = provider.chat(system=system, messages=messages)
         meter.add(usage)
         turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,

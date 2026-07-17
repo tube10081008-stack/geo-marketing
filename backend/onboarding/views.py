@@ -11,12 +11,33 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import CustomerTransaction, Merchant
+from .models import CustomerTransaction, Merchant, record_snapshot
 from .serializers import (
     BaselineCardSerializer,
     CustomerTransactionSerializer,
     MerchantIntakeSerializer,
 )
+
+# intake 폼 → 시계열 스냅샷 매핑 (관계, 필드)
+_SNAPSHOT_FIELDS = [
+    ("acquisition", "avg_rating"), ("acquisition", "review_count"),
+    ("acquisition", "place_clicks"),
+    ("conversion", "aov"), ("conversion", "monthly_customers"),
+    ("conversion", "visit_to_purchase_rate"),
+    ("retention", "revisit_rate"), ("retention", "regular_ratio"),
+    ("retention", "nps"),
+]
+
+
+def _snapshot_intake(merchant):
+    """데이터 입력 폼의 지표를 시계열로 축적 — 값이 그대로면 스킵."""
+    if merchant.monthly_revenue is not None:
+        record_snapshot(merchant, "monthly_revenue", merchant.monthly_revenue, "intake")
+    for rel, field in _SNAPSHOT_FIELDS:
+        base = getattr(merchant, rel, None)
+        value = getattr(base, field, None) if base is not None else None
+        if value is not None:
+            record_snapshot(merchant, field, value, "intake")
 
 
 class MerchantViewSet(viewsets.ModelViewSet):
@@ -32,7 +53,12 @@ class MerchantViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        merchant = serializer.save(owner=self.request.user)
+        _snapshot_intake(merchant)
+
+    def perform_update(self, serializer):
+        merchant = serializer.save()
+        _snapshot_intake(merchant)
 
     @action(detail=True, methods=["get"])
     def card(self, request, pk=None):

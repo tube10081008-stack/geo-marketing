@@ -16,7 +16,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import charge, get_wallet
-from onboarding.models import ChatMessage, DeepReport, Merchant
+from onboarding.models import (
+    Action, ChatMessage, DeepReport, Merchant, record_snapshot,
+)
 
 from .chat import MAX_HISTORY_MESSAGES, maybe_compact, run_chat
 from .deepreport import run_report
@@ -64,8 +66,9 @@ _UPDATE_MAP = {
 
 
 def _apply_updates(merchant, updates: dict):
-    """대화 중 갱신된 지표를 DB에 영속. 없는 베이스라인은 건너뜀(등급은 수기=C 유지)."""
+    """대화 중 갱신된 지표를 DB에 영속 + 시계열 스냅샷 축적(전/후 검증의 원천)."""
     for key, value in updates.items():
+        record_snapshot(merchant, key, value, source="chat")
         target = _UPDATE_MAP.get(key)
         if not target:
             continue
@@ -79,6 +82,9 @@ def _apply_updates(merchant, updates: dict):
 class AdviseView(APIView):
     permission_classes = [IsAuthenticated]
 
+    # 페르소나별 기본 추적 지표 — 사장님이 실제로 잴 수 있는 것 우선(공개/장부 지표)
+    _DEFAULT_TARGET = {"acq": "review_count", "cvr": "aov", "ret": "revisit_rate"}
+
     def post(self, request):
         merchant = _merchant(request, request.data.get("merchant_id"))
         provider = get_provider()
@@ -88,6 +94,22 @@ class AdviseView(APIView):
         meter = Meter()
         result = run_geo(merchant, request.data.get("question", ""),
                          provider=provider, meter=meter)
+
+        # 조언 → 추적 가능한 액션 티켓(페르소나당 미결 1건만 유지, 중복 제안 방지)
+        open_personas = set(
+            merchant.actions.filter(status__in=["proposed", "active"])
+            .values_list("persona", flat=True))
+        for a in result.get("actions", []):
+            if a["persona"] in open_personas:
+                a["action_id"] = None
+                continue
+            ticket = Action.objects.create(
+                merchant=merchant, persona=a["persona"],
+                title=(a.get("action") or "")[:300], detail=a.get("action") or "",
+                target_metric=self._DEFAULT_TARGET.get(a["persona"], ""),
+                citations=a.get("citations") or [])
+            a["action_id"] = ticket.pk
+
         result["billing"].update(_charge(request.user, provider, meter))
         return Response(result)
 
@@ -123,8 +145,16 @@ class ChatView(APIView):
             report_note = (f"리포트 #{last_report.pk} · {when} · 티어 {last_report.tier}\n"
                            + last_report.content_md[:700])
 
+        # 진행 중 실행안 — 에이전트가 자연스럽게 진행 상황·지표를 확인하도록 주입
+        open_actions = merchant.actions.filter(status__in=["proposed", "active"])[:5]
+        actions_note = "\n".join(
+            f"- [{a.persona}] {a.title[:80]} (상태: {a.get_status_display()}"
+            + (f", 타깃 {a.target_metric}" if a.target_metric else "") + ")"
+            for a in open_actions)
+
         result = run_chat(merchant, history, message, forced,
-                          provider=provider, meter=meter, report_note=report_note)
+                          provider=provider, meter=meter, report_note=report_note,
+                          actions_note=actions_note)
 
         # 영속: 사용자 메시지 + (갱신 시)베이스라인 DB 반영 + 시스템 + 에이전트 답변들
         ChatMessage.objects.create(merchant=merchant, role="user", text=message)
@@ -202,3 +232,73 @@ class ReportDetailView(APIView):
         report = get_object_or_404(
             DeepReport, pk=report_id, merchant__owner=request.user)
         return Response(_report_payload(report))
+
+
+def _action_payload(a: Action) -> dict:
+    return {
+        "id": a.pk, "persona": a.persona, "title": a.title,
+        "target_metric": a.target_metric, "citations": a.citations,
+        "status": a.status,
+        "baseline_value": float(a.baseline_value) if a.baseline_value is not None else None,
+        "result_value": float(a.result_value) if a.result_value is not None else None,
+        "delta_pct": a.delta(),
+        "started_at": a.started_at.isoformat() if a.started_at else None,
+        "created_at": a.created_at.isoformat(),
+    }
+
+
+class ActionsView(APIView):
+    """액션 티켓 목록 — 조언→실측 루프의 현재 상태판."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        merchant = _merchant(request, request.query_params.get("merchant_id"))
+        return Response([_action_payload(a) for a in merchant.actions.all()[:20]])
+
+
+class ActionDetailView(APIView):
+    """상태 전이: 시작(baseline 캡처) → 완료(실측 캡처, 델타 산출) / 중단."""
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, action_id):
+        from django.utils import timezone
+
+        act = get_object_or_404(Action, pk=action_id, merchant__owner=request.user)
+        to = request.data.get("status")
+        if to not in ("active", "done", "dropped"):
+            return Response({"detail": "status는 active|done|dropped"}, status=400)
+
+        def latest(metric, after=None):
+            qs = act.merchant.snapshots.filter(metric=metric)
+            if after:
+                qs = qs.filter(created_at__gt=after)
+            snap = qs.last()
+            return snap.value if snap else None
+
+        note = ""
+        if to == "active" and act.status == Action.Status.PROPOSED:
+            act.started_at = timezone.now()
+            if act.target_metric:
+                act.baseline_value = latest(act.target_metric)
+                if act.baseline_value is None:
+                    note = "시작 시점 값이 없어요 — 채팅에 현재 값을 알려주면 기준선으로 잡습니다."
+        elif to == "done" and act.status == Action.Status.ACTIVE:
+            act.closed_at = timezone.now()
+            if act.target_metric:
+                act.result_value = latest(act.target_metric, after=act.started_at)
+                if act.result_value is None:
+                    note = ("시작 이후 측정값이 없어 델타를 못 냈어요 — 채팅에 "
+                            "현재 값을 말한 뒤 다시 완료 처리하면 실측이 기록됩니다.")
+                    act.closed_at = None
+                    act.save()
+                    return Response(
+                        {**_action_payload(act), "note": note, "detail": note}, status=409)
+        elif to == "dropped":
+            act.closed_at = timezone.now()
+        else:
+            return Response({"detail": f"{act.status}→{to} 전이는 허용되지 않습니다."}, status=409)
+        act.status = to
+        act.save()
+        return Response({**_action_payload(act), "note": note})
