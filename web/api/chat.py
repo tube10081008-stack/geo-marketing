@@ -84,7 +84,7 @@ class Gemini:
     generator_model = os.environ.get("GEO_GEMINI_GENERATOR", "gemini-2.5-flash")
     _EP = "https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={k}"
 
-    def _post(self, model, system, contents, max_tokens):
+    def _post(self, model, system, contents, max_tokens, notice_on_cut=False):
         key = os.environ["GEMINI_API_KEY"]
         body = json.dumps({
             "systemInstruction": {"parts": [{"text": system}]},
@@ -95,8 +95,11 @@ class Gemini:
                                      headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.load(r)
-        parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+        cand = (data.get("candidates") or [{}])[0]
+        parts = cand.get("content", {}).get("parts", [])
         text = "".join(p.get("text", "") for p in parts)
+        if notice_on_cut and cand.get("finishReason") == "MAX_TOKENS" and text:
+            text += "\n\n…(답변이 길어 여기서 잘렸어요 — \"이어서\"라고 보내시면 이어서 답합니다.)"
         um = data.get("usageMetadata", {})
         return text, (um.get("promptTokenCount", 0),
                       um.get("candidatesTokenCount", 0) + um.get("thoughtsTokenCount", 0))
@@ -105,7 +108,7 @@ class Gemini:
         return self._post(model, system, [{"role": "user", "parts": [{"text": prompt}]}], max_tokens)
 
     def chat(self, system, contents, max_tokens=1024):
-        return self._post(self.generator_model, system, contents, max_tokens)
+        return self._post(self.generator_model, system, contents, max_tokens, notice_on_cut=True)
 
 
 def get_provider():
@@ -195,7 +198,9 @@ def _system(persona, merchant, fields, collab=None):
                 "할 수 없으며 하겠다고 말해서도 안 된다. 확정 판단은 세무사(무료 '마을세무사' 포함)나 "
                 "국세청 126 상담을 안내하라.\n"
                 "[개정 주의] 세법은 매년 바뀐다. 수치·기한엔 기준연도를 붙이고, 근거에 없는 수치는 "
-                "'홈택스/세무사 확인 필요'라고 명시하라. 마케팅 질문은 획득·전환·유지 팀으로 안내. 2~5문장.")
+                "'홈택스/세무사 확인 필요'라고 명시하라. 마케팅 질문은 획득·전환·유지 팀으로 안내.\n"
+                "[분량 규율] 기본 2~5문장. 체크리스트 요청도 1,000자 이내 중요도순 3~4개 항목까지만, "
+                "남은 주제는 \"○○는 이어서 물어보세요\"로 예고. 절대 문장 중간에서 끝내지 마라.")
     others = ", ".join(PERSONA_META[p][0] for p in ("acq", "cvr", "ret") if p != persona)
     base = (f"너는 소상공인 '{merchant}'의 마케팅 {label} 담당 에이전트다. 담당 KPI: {kpi}.\n"
             f"베이스라인: {_card_summary(fields)}.\n"
@@ -230,9 +235,9 @@ def run_chat(merchant, fields, history, message, forced=None):
     for p in personas:
         label, kpi = PERSONA_META[p]
         system = _system(p, merchant or "내 가게", fields, collab)
-        # 코라는 체크리스트형 답이 길다 — 잘림 방지로 상한 2배
+        # 코라는 체크리스트형 답이 길다 — 상한 3배 + 길이규율 + 절단감지 3중 방어
         reply, (i, o) = provider.chat(system, base_contents,
-                                      max_tokens=2048 if p == "cora" else 1024)
+                                      max_tokens=3072 if p == "cora" else 1024)
         meter.add(provider.generator_model, i, o)
         turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,
                       "citations": [m for m, _, _ in CORPUS[p]]})

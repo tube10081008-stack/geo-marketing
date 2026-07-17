@@ -103,6 +103,7 @@
   .btn.tiny{width:auto; padding:6px 12px; font-size:12px;}
   .delta{margin-top:8px; font-size:12.5px; font-weight:700; color:var(--cvr);}
   #checkinBar{flex-wrap:wrap;}
+  .ck-abab{display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--mut); cursor:pointer;}
   .ck-fields{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
   .ck-fields input{padding:8px 10px; border:1px solid var(--line); border-radius:8px;
     width:128px; font:inherit; font-size:12.5px; background:var(--card); color:inherit;}
@@ -549,6 +550,7 @@ const ACT_ST = {proposed:'제안됨', active:'실행 중', done:'완료(실측)'
 function actionBtns(id, st){
   if (st === 'proposed') return `<div class="act-ctl" data-id="${id}">
     <button class="btn tiny" data-cmd="active">▶ 시작</button>
+    <label class="ck-abab"><input type="checkbox" class="abab" /> 격주 on-off 검증</label>
     <button class="btn tiny ghost" data-cmd="dropped">건너뛰기</button></div>`;
   if (st === 'active') return `<div class="act-ctl" data-id="${id}">
     <button class="btn tiny" data-cmd="done">✓ 실측 완료</button>
@@ -559,12 +561,18 @@ function renderActions(list){
   if (!list || !list.length) return;
   $('#actGrid').innerHTML = list.map(a => {
     const m = PERSONA[a.persona] || {name:'', color:'var(--accent)'};
-    const tgt = a.target_metric ? ' · 타깃 ' + (FIELD_LABELS[a.target_metric] || a.target_metric) : '';
-    const delta = (a.delta_pct != null)
-      ? `<div class="delta">실측 ${a.baseline_value} → ${a.result_value} (${a.delta_pct>0?'+':''}${a.delta_pct}%) · 신호이며 증명은 아님</div>` : '';
+    let tag = ACT_ST[a.status] || a.status;
+    if (a.target_metric) tag += ' · 타깃 ' + (FIELD_LABELS[a.target_metric] || a.target_metric);
+    if (a.phase) tag += a.phase === 'on' ? ' · 🟢 이번 주 실행' : ' · ⏸ 이번 주 중단';
+    let delta = '';
+    if (a.abab && a.abab.diff_pct != null)
+      delta = `<div class="delta">격주 교차: 실행주 평균 ${a.abab.on_mean} vs 중단주 ${a.abab.off_mean} `
+            + `(${a.abab.diff_pct>0?'+':''}${a.abab.diff_pct}%, n=${a.abab.n_on}/${a.abab.n_off}) · 계절성에 강한 신호</div>`;
+    else if (a.delta_pct != null)
+      delta = `<div class="delta">실측 ${a.baseline_value} → ${a.result_value} (${a.delta_pct>0?'+':''}${a.delta_pct}%) · 신호이며 증명은 아님</div>`;
     return `<div class="act">
       <div class="top"><span class="pill" style="background:${m.color}">${esc(m.name)}</span>
-        <span class="kpi-tag">${ACT_ST[a.status]||a.status}${tgt}</span></div>
+        <span class="kpi-tag">${tag}</span></div>
       <div class="body">${mdLite(a.title)}</div>${delta}
       <div class="cites">${(a.citations||[]).map(c=>`<span class="cite">${c}</span>`).join('')}</div>
       ${actionBtns(a.id, a.status)}
@@ -581,11 +589,14 @@ async function refreshActions(){
 }
 $('#actGrid').addEventListener('click', async e => {
   const b = e.target.closest('button[data-cmd]'); if (!b) return;
-  const id = b.closest('.act-ctl').dataset.id;
+  const ctl = b.closest('.act-ctl'), id = ctl.dataset.id;
+  const abab = ctl.querySelector('input.abab');
+  const body = { status: b.dataset.cmd };
+  if (b.dataset.cmd === 'active' && abab && abab.checked) body.protocol = 'abab';
   b.disabled = true;
   try {
     const d = await api('/agents/actions/'+id+'/', {method:'PATCH',
-      body: JSON.stringify({status: b.dataset.cmd})});
+      body: JSON.stringify(body)});
     if (d.status === 'done' && d.delta_pct != null)
       toast(`실측 기록 ✓ ${d.baseline_value} → ${d.result_value} (${d.delta_pct>0?'+':''}${d.delta_pct}%)`, 6000);
     else if (d.note) toast(d.note, 6000);

@@ -455,8 +455,15 @@ class Action(models.Model):
         DONE = "done", "완료(실측)"
         DROPPED = "dropped", "중단"
 
+    class Protocol(models.TextChoices):
+        SIMPLE = "simple", "전후 비교"
+        ABAB = "abab", "격주 on-off 교차"
+
     merchant = models.ForeignKey(
         Merchant, on_delete=models.CASCADE, related_name="actions", verbose_name="업체")
+    protocol = models.CharField(
+        "검증 프로토콜", max_length=8, choices=Protocol.choices, default=Protocol.SIMPLE,
+        help_text="abab=격주로 실행/중단을 교차해 국면 평균을 비교(계절성·추세에 강함)")
     persona = models.CharField("담당", max_length=8)  # acq|cvr|ret
     title = models.CharField("액션 요약", max_length=300)
     detail = models.TextField("상세", blank=True, default="")
@@ -486,6 +493,33 @@ class Action(models.Model):
         return round(
             (float(self.result_value) - float(self.baseline_value))
             / float(self.baseline_value) * 100, 1)
+
+    def abab_phase(self, at=None):
+        """격주 국면: 시작 후 짝수 주=실행(on), 홀수 주=중단(off)."""
+        from django.utils import timezone
+
+        if self.protocol != self.Protocol.ABAB or not self.started_at:
+            return None
+        weeks = ((at or timezone.now()) - self.started_at).days // 7
+        return "on" if weeks % 2 == 0 else "off"
+
+    def abab_result(self):
+        """실행 주 스냅샷 평균 vs 중단 주 평균 — 국면별 1개 이상일 때만(교차설계 귀인)."""
+        if self.protocol != self.Protocol.ABAB or not (self.started_at and self.target_metric):
+            return None
+        snaps = self.merchant.snapshots.filter(
+            metric=self.target_metric, created_at__gt=self.started_at)
+        if self.closed_at:
+            snaps = snaps.filter(created_at__lte=self.closed_at)
+        on, off = [], []
+        for s in snaps:
+            (on if self.abab_phase(s.created_at) == "on" else off).append(float(s.value))
+        if not on or not off:
+            return None
+        mo, mf = sum(on) / len(on), sum(off) / len(off)
+        return {"on_mean": round(mo, 2), "off_mean": round(mf, 2),
+                "n_on": len(on), "n_off": len(off),
+                "diff_pct": round((mo - mf) / mf * 100, 1) if mf else None}
 
     def __str__(self):
         return f"{self.merchant.name} · [{self.persona}] {self.title[:30]} ({self.status})"

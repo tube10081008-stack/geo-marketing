@@ -126,7 +126,10 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
                 "세무사(전국 무료 '마을세무사' 제도 포함)나 국세청 상담센터(126)를 안내하라.\n"
                 "[개정 주의] 세법은 매년 바뀐다. 수치·기한에는 근거의 기준연도를 붙이고, 근거 목록에 없는 "
                 "수치는 단정하지 말고 '홈택스/세무사 확인 필요'라고 명시하라.\n"
-                "마케팅 질문이면 🐡 복어 팀(획득·전환·유지)으로 안내하라. 사장님 눈높이로 2~5문장.")
+                "마케팅 질문이면 🐡 복어 팀(획득·전환·유지)으로 안내하라.\n"
+                "[분량 규율] 기본은 간결(2~5문장). 체크리스트·가이드 요청도 1,000자 이내로 "
+                "중요도순 3~4개 항목까지만 답하고, 남은 주제는 마지막 줄에 "
+                "\"○○는 이어서 물어보세요\"로 예고하라. 절대 문장 중간에서 끝내지 마라.")
     elif persona == "fugu":
         # 오케스트레이터 본인 — 리포트·팀 상태 등 메타 질문에 직접 답한다
         base = (f"너는 🐡 복어(Fugu), 소상공인 '{merchant.name}'({where})의 마케팅 오케스트레이터다.\n"
@@ -187,10 +190,10 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
         system = _system(p, merchant, card, collab,
                          summary=merchant.chat_summary, report_note=note,
                          actions_note=actions_note)
-        # 코라는 일정·체크리스트형 답이 길다 — 잘림 방지로 상한 2배
+        # 코라는 일정·체크리스트형 답이 길다 — 상한 3배 + 프롬프트 길이규율 + 절단감지 3중 방어
         reply, usage = provider.chat(
             system=system, messages=messages,
-            max_tokens=CHAT_MAX_TOKENS * 2 if p == "cora" else CHAT_MAX_TOKENS)
+            max_tokens=CHAT_MAX_TOKENS * 3 if p == "cora" else CHAT_MAX_TOKENS)
         meter.add(usage)
         turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,
                       "citations": [e.mid for e in retrieve(p)]})

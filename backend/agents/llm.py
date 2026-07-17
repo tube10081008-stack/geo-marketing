@@ -90,7 +90,7 @@ class GeminiProvider:
     generator_model = os.environ.get("GEO_GEMINI_GENERATOR", "gemini-2.5-flash")
     _EP = "https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={k}"
 
-    def _post(self, model, system, contents, max_tokens):
+    def _post(self, model, system, contents, max_tokens, notice_on_cut=False):
         key = os.environ["GEMINI_API_KEY"]
         body = json.dumps({
             "systemInstruction": {"parts": [{"text": system}]},
@@ -101,8 +101,12 @@ class GeminiProvider:
                                      headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.load(r)
-        parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+        cand = (data.get("candidates") or [{}])[0]
+        parts = cand.get("content", {}).get("parts", [])
         text = "".join(p.get("text", "") for p in parts)
+        # 문장 중간 침묵 절단 방지: 상한 도달을 감지해 이어보기 안내를 붙인다
+        if notice_on_cut and cand.get("finishReason") == "MAX_TOKENS" and text:
+            text += "\n\n…(답변이 길어 여기서 잘렸어요 — \"이어서\"라고 보내시면 이어서 답합니다.)"
         um = data.get("usageMetadata", {})
         out = um.get("candidatesTokenCount", 0) + um.get("thoughtsTokenCount", 0)
         return text, Usage(model=model, input_tokens=um.get("promptTokenCount", 0), output_tokens=out)
@@ -111,7 +115,8 @@ class GeminiProvider:
         return self._post(model, system, [{"role": "user", "parts": [{"text": prompt}]}], max_tokens)
 
     def chat(self, *, system, messages, max_tokens=CHAT_MAX_TOKENS):
-        return self._post(self.generator_model, system, _to_contents(messages), max_tokens)
+        return self._post(self.generator_model, system, _to_contents(messages), max_tokens,
+                          notice_on_cut=True)
 
 
 class AnthropicProvider:
@@ -134,7 +139,10 @@ class AnthropicProvider:
                  "content": m.get("text", "")} for m in messages or []]
         resp = self._client().messages.create(
             model=self.generator_model, max_tokens=max_tokens, system=system, messages=conv)
-        return self._text(resp)
+        text, usage = self._text(resp)
+        if getattr(resp, "stop_reason", "") == "max_tokens" and text:
+            text += "\n\n…(답변이 길어 여기서 잘렸어요 — \"이어서\"라고 보내시면 이어서 답합니다.)"
+        return text, usage
 
     def _text(self, resp):
         text = "".join(b.text for b in resp.content if b.type == "text")

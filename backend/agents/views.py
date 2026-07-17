@@ -147,10 +147,15 @@ class ChatView(APIView):
 
         # 진행 중 실행안 — 에이전트가 자연스럽게 진행 상황·지표를 확인하도록 주입
         open_actions = merchant.actions.filter(status__in=["proposed", "active"])[:5]
-        actions_note = "\n".join(
-            f"- [{a.persona}] {a.title[:80]} (상태: {a.get_status_display()}"
-            + (f", 타깃 {a.target_metric}" if a.target_metric else "") + ")"
-            for a in open_actions)
+
+        def _act_line(a):
+            phase = a.abab_phase()
+            extra = (f", 타깃 {a.target_metric}" if a.target_metric else "")
+            if phase:
+                extra += f", 격주검증 — 이번 주는 '{'실행' if phase == 'on' else '중단'}' 주간(사장님에게 상기시켜라)"
+            return f"- [{a.persona}] {a.title[:80]} (상태: {a.get_status_display()}{extra})"
+
+        actions_note = "\n".join(_act_line(a) for a in open_actions)
 
         result = run_chat(merchant, history, message, forced,
                           provider=provider, meter=meter, report_note=report_note,
@@ -289,7 +294,9 @@ def _action_payload(a: Action) -> dict:
     return {
         "id": a.pk, "persona": a.persona, "title": a.title,
         "target_metric": a.target_metric, "citations": a.citations,
-        "status": a.status,
+        "status": a.status, "protocol": a.protocol,
+        "phase": a.abab_phase() if a.status == Action.Status.ACTIVE else None,
+        "abab": a.abab_result(),
         "baseline_value": float(a.baseline_value) if a.baseline_value is not None else None,
         "result_value": float(a.result_value) if a.result_value is not None else None,
         "delta_pct": a.delta(),
@@ -331,6 +338,11 @@ class ActionDetailView(APIView):
         note = ""
         if to == "active" and act.status == Action.Status.PROPOSED:
             act.started_at = timezone.now()
+            if request.data.get("protocol") in Action.Protocol.values:
+                act.protocol = request.data["protocol"]
+            if act.protocol == Action.Protocol.ABAB:
+                note = ("격주 교차 검증 시작 — 이번 주는 '실행', 다음 주는 '중단'을 반복하세요. "
+                        "주간 체크인 기록이 국면별 평균 비교에 쓰입니다.")
             if act.target_metric:
                 act.baseline_value = latest(act.target_metric)
                 if act.baseline_value is None:
@@ -346,6 +358,9 @@ class ActionDetailView(APIView):
                     act.save()
                     return Response(
                         {**_action_payload(act), "note": note, "detail": note}, status=409)
+                if act.protocol == Action.Protocol.ABAB and act.abab_result() is None:
+                    note = ("국면별(실행/중단 주) 측정이 부족해 교차 비교는 못 냈어요 — "
+                            "전후 비교만 기록합니다.")
         elif to == "dropped":
             act.closed_at = timezone.now()
         else:
