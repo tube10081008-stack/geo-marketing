@@ -112,7 +112,7 @@ def _label(persona):
 
 
 def _system(persona, merchant, card, collab=None, summary="", report_note="",
-            actions_note=""):
+            actions_note="", benchmark_note=""):
     where = f"{merchant.get_industry_display()}, {merchant.location}"
     if persona == "cora":
         # 세무 가이드 — 개념·일정·절세제도·준비까지만. 세무대리 금지(세무사법 준수)
@@ -157,6 +157,10 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
         base += (f"\n\n[진행 중 실행안 — 조언→실측 루프]\n{actions_note}\n"
                  "관련 대화면 진행 상황을 한 번 자연스럽게 확인하고, 타깃 지표의 현재 값을 "
                  "물어보라(사장님이 숫자를 말하면 자동 기록된다). 억지로 끼워넣지는 마라.")
+    if benchmark_note and persona != "cora":
+        base += (f"\n\n[업종 벤치마크 — 익명 집계, 계절성 통제(diff-in-diff)]\n{benchmark_note}\n"
+                 "'차분(%p)'이 업종 전체 추세를 뺀 순수 개선 신호다. 성과 평가·조언 조정 시 "
+                 "절대 증가율이 아니라 이 차분을 근거로 말하라. 표본(n)이 작으면 참고 수준임을 밝혀라.")
     base += _HONESTY
     if summary:
         base += f"\n\n[장기기억 — 이전 대화 요약]\n{summary[:SUMMARY_MAX_CHARS]}"
@@ -168,7 +172,7 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
 
 
 def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
-             report_note="", actions_note=""):
+             report_note="", actions_note="", benchmark_note=""):
     card = merchant.baseline_card()
     provider = provider or get_provider()
     meter = meter if meter is not None else Meter()
@@ -189,7 +193,7 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
         note = report_note if (p == "fugu" or mentions_report) else ""
         system = _system(p, merchant, card, collab,
                          summary=merchant.chat_summary, report_note=note,
-                         actions_note=actions_note)
+                         actions_note=actions_note, benchmark_note=benchmark_note)
         # 코라는 일정·체크리스트형 답이 길다 — 상한 3배 + 프롬프트 길이규율 + 절단감지 3중 방어
         reply, usage = provider.chat(
             system=system, messages=messages,

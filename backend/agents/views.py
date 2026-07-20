@@ -20,6 +20,7 @@ from onboarding.models import (
     Action, ChatMessage, DeepReport, Merchant, record_snapshot,
 )
 
+from .benchmark import MIN_SAMPLE, WINDOW_DAYS, benchmark_note, benchmark_rows
 from .chat import MAX_HISTORY_MESSAGES, maybe_compact, run_chat
 from .deepreport import run_report
 from .llm import Meter, get_provider
@@ -159,7 +160,8 @@ class ChatView(APIView):
 
         result = run_chat(merchant, history, message, forced,
                           provider=provider, meter=meter, report_note=report_note,
-                          actions_note=actions_note)
+                          actions_note=actions_note,
+                          benchmark_note=benchmark_note(merchant))
 
         # 영속: 사용자 메시지 + (갱신 시)베이스라인 DB 반영 + 시스템 + 에이전트 답변들
         ChatMessage.objects.create(merchant=merchant, role="user", text=message)
@@ -368,3 +370,23 @@ class ActionDetailView(APIView):
         act.status = to
         act.save()
         return Response({**_action_payload(act), "note": note})
+
+
+class BenchmarkView(APIView):
+    """업종 벤치마크 차분(루프 ⑤) — '내 증가율 vs 동종업종 중앙값'으로 계절성 통제.
+
+    익명 집계만 반환(개별 업체 값 미노출). 표본 n < MIN_SAMPLE이면 업종 값은
+    숨기고 n만 공개해 '언제 열리는지'를 정직하게 보여준다. 순수 DB 연산 — 무과금.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        merchant = _merchant(request, request.query_params.get("merchant_id"))
+        return Response({
+            "industry": merchant.industry,
+            "industry_label": merchant.get_industry_display(),
+            "window_days": WINDOW_DAYS,
+            "min_sample": MIN_SAMPLE,
+            "rows": benchmark_rows(merchant),
+        })

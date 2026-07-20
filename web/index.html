@@ -205,6 +205,7 @@
       <a href="#overview" class="on"><span class="ico">▦</span>개요</a>
       <a href="#chat"><span class="ico">◧</span>에이전트 대화</a>
       <a href="#actions"><span class="ico">▤</span>실행 액션</a>
+      <a href="#bench"><span class="ico">◫</span>업종 벤치마크</a>
     </nav>
     <div class="spacer"></div>
     <div class="status">
@@ -276,6 +277,12 @@
       <div class="sec-head" id="actions"><h2>실행 액션</h2><span class="hint">근거 인용 [M#] · 측정 목표 포함</span></div>
       <div class="acts" id="actGrid"></div>
       <div class="footnote">근거 수치는 원 연구의 맥락(주로 해외 데이터) 기준의 방향성 지침입니다. 실제 효과는 이 가게의 실측 A/B로 검증하며, 데모(stub) 응답에는 포인트가 차감되지 않습니다.</div>
+    </section>
+
+    <section class="sec" id="benchSec" hidden>
+      <div class="sec-head" id="bench"><h2>업종 벤치마크</h2><span class="hint">내 증가율 vs 동종업종 중앙값 · 익명 집계 · 계절성 통제</span></div>
+      <div class="acts" id="benchGrid"></div>
+      <div class="footnote">같은 업종 가입 업체들의 최근 90일 증가율을 익명 집계한 값입니다. 개별 업체 정보는 노출되지 않으며, 표본이 10곳 미만인 지표는 왜곡 방지를 위해 표본이 찰 때까지 업종 값을 숨깁니다. '차분(%p)'이 업종 전체 흐름(계절 특수 등)을 뺀 순수 개선 신호입니다.</div>
     </section>
   </main>
 </div>
@@ -587,6 +594,30 @@ async function refreshActions(){
     renderActions(list);
   } catch(e){}
 }
+
+/* ── 업종 벤치마크(루프 ⑤): 내 증가율 vs 동종업종 중앙값 — 계절성 통제 차분 ── */
+async function refreshBenchmark(){
+  if (!auth || !mid) return;
+  try {
+    const d = await api('/agents/benchmark/?merchant_id=' + mid);
+    if (!d.rows || !d.rows.length) { $('#benchSec').hidden = true; return; }
+    $('#benchGrid').innerHTML = d.rows.map(r => {
+      const pct = v => `${v>0?'+':''}${v}%`;
+      let cmp;
+      if (r.hidden)
+        cmp = `<div class="delta">업종(${esc(d.industry_label)}) 집계 대기 — 표본 ${r.n}/${d.min_sample}곳. `
+            + `왜곡 방지를 위해 표본이 차면 자동 공개돼요.</div>`;
+      else
+        cmp = `<div class="delta">업종 중앙값 ${pct(r.industry_pct)} → 차분 <b>${r.diff_pct>0?'+':''}${r.diff_pct}%p</b> (n=${r.n}) · `
+            + `${r.diff_pct>=0?'업종 흐름보다 앞서는 신호':'업종 흐름 대비 뒤처짐 — 실행 액션 점검'}</div>`;
+      return `<div class="act">
+        <div class="top"><span class="kpi-tag">최근 ${d.window_days}일 · ${esc(d.industry_label)}</span></div>
+        <div class="body"><b>${esc(r.label)}</b> 내 증가율 ${pct(r.mine_pct)}</div>${cmp}
+      </div>`;
+    }).join('');
+    $('#benchSec').hidden = false;
+  } catch(e){}
+}
 $('#actGrid').addEventListener('click', async e => {
   const b = e.target.closest('button[data-cmd]'); if (!b) return;
   const ctl = b.closest('.act-ctl'), id = ctl.dataset.id;
@@ -770,6 +801,7 @@ async function loadWorkspace(){
       $('#emptyBanner').hidden = true;
       renderKpis();
       refreshActions();  // 액션 티켓(조언→실측 루프) 상태판 복원
+      refreshBenchmark();  // 업종 벤치마크(루프 ⑤) — 내 추세가 있으면 표시
       // 주간 체크인: 마지막 측정 7일 경과 시 30초 측정 바 노출
       api('/agents/checkin/?merchant_id='+mid)
         .then(s => { if (s.due && !sessionStorage.getItem('ckSkip')) $('#checkinBar').hidden = false; })
@@ -872,6 +904,7 @@ $('#ckSave').addEventListener('click', async () => {
     if (d.recorded.avg_rating) window._ctx.fields.avg_rating = d.recorded.avg_rating;
     if (d.recorded.review_count) window._ctx.fields.review_count = d.recorded.review_count;
     renderKpis();
+    refreshBenchmark();  // 새 측정으로 추세가 바뀌었을 수 있다
     sysBubble('주간 체크인 기록 완료 — 추세에 반영됐어요. 진행 중 액션의 실측에도 사용됩니다.');
     toast('체크인 기록 ✓', 4000);
   } catch (e) { toast('체크인 실패: ' + e.message, 6000); }
