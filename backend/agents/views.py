@@ -17,9 +17,11 @@ from rest_framework.views import APIView
 
 from accounts.models import charge, get_wallet
 from onboarding.models import (
-    Action, ChatMessage, DeepReport, Merchant, record_snapshot,
+    Action, ChatMessage, DeepReport, Merchant, record_margin_snapshots,
+    record_snapshot,
 )
 
+from .benchmark import MIN_SAMPLE, WINDOW_DAYS, benchmark_note, benchmark_rows
 from .chat import MAX_HISTORY_MESSAGES, maybe_compact, run_chat
 from .deepreport import run_report
 from .llm import Meter, get_provider
@@ -64,11 +66,18 @@ _UPDATE_MAP = {
     "nps": ("retention", "nps"),
 }
 
+# 이 값들이 바뀌면 공헌이익도 다시 계산해 파생 스냅샷을 남긴다
+_MARGIN_INPUTS = {"aov", "monthly_revenue", "variable_cost_ratio"}
 
-def _apply_updates(merchant, updates: dict):
+
+def _apply_updates(merchant, updates: dict, source="chat"):
     """대화 중 갱신된 지표를 DB에 영속 + 시계열 스냅샷 축적(전/후 검증의 원천)."""
     for key, value in updates.items():
-        record_snapshot(merchant, key, value, source="chat")
+        record_snapshot(merchant, key, value, source=source)
+        if key == "variable_cost_ratio":
+            merchant.variable_cost_ratio = value
+            merchant.save(update_fields=["variable_cost_ratio"])
+            continue
         target = _UPDATE_MAP.get(key)
         if not target:
             continue
@@ -77,6 +86,10 @@ def _apply_updates(merchant, updates: dict):
         if base is not None:
             setattr(base, field, value)
             base.save(update_fields=[field])
+    # 매출·객단가·변동비율이 움직였으면 공헌이익 시계열도 갱신(목적함수는 이익)
+    if _MARGIN_INPUTS & set(updates):
+        merchant.refresh_from_db()
+        record_margin_snapshots(merchant, source=source)
 
 
 class AdviseView(APIView):
@@ -84,6 +97,14 @@ class AdviseView(APIView):
 
     # 페르소나별 기본 추적 지표 — 사장님이 실제로 잴 수 있는 것 우선(공개/장부 지표)
     _DEFAULT_TARGET = {"acq": "review_count", "cvr": "aov", "ret": "revisit_rate"}
+    # 변동비율을 알면 전환 액션의 타깃을 객단가 → 주문당 공헌이익으로 승격.
+    # 할인으로 객단가만 올리고 마진을 깎는 액션이 '성공'으로 판정되는 것을 막는다.
+    _MARGIN_TARGET = {"cvr": "unit_contribution_margin"}
+
+    def _target_metric(self, persona, merchant):
+        if merchant.variable_cost_ratio is not None and persona in self._MARGIN_TARGET:
+            return self._MARGIN_TARGET[persona]
+        return self._DEFAULT_TARGET.get(persona, "")
 
     def post(self, request):
         merchant = _merchant(request, request.data.get("merchant_id"))
@@ -106,7 +127,7 @@ class AdviseView(APIView):
             ticket = Action.objects.create(
                 merchant=merchant, persona=a["persona"],
                 title=(a.get("action") or "")[:300], detail=a.get("action") or "",
-                target_metric=self._DEFAULT_TARGET.get(a["persona"], ""),
+                target_metric=self._target_metric(a["persona"], merchant),
                 citations=a.get("citations") or [])
             a["action_id"] = ticket.pk
 
@@ -159,7 +180,8 @@ class ChatView(APIView):
 
         result = run_chat(merchant, history, message, forced,
                           provider=provider, meter=meter, report_note=report_note,
-                          actions_note=actions_note)
+                          actions_note=actions_note,
+                          benchmark_note=benchmark_note(merchant))
 
         # 영속: 사용자 메시지 + (갱신 시)베이스라인 DB 반영 + 시스템 + 에이전트 답변들
         ChatMessage.objects.create(merchant=merchant, role="user", text=message)
@@ -246,7 +268,9 @@ class CheckinView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
-    FIELDS = ("avg_rating", "review_count", "monthly_revenue")
+    # 변동비율은 자주 안 바뀌지만, 들어오면 공헌이익 시계열이 살아난다
+    FIELDS = ("avg_rating", "review_count", "monthly_revenue", "aov",
+              "variable_cost_ratio")
     DUE_DAYS = 7
 
     def get(self, request):
@@ -275,8 +299,6 @@ class CheckinView(APIView):
             return Response({"detail": "기록할 숫자가 없습니다."}, status=400)
 
         # 베이스라인(현재값)도 동기화
-        _apply_updates(merchant, {k: str(v) for k, v in recorded.items()
-                                  if k in _UPDATE_MAP})
         if "monthly_revenue" in recorded:
             try:
                 merchant.monthly_revenue = int(
@@ -284,6 +306,9 @@ class CheckinView(APIView):
                 merchant.save(update_fields=["monthly_revenue"])
             except ValueError:
                 pass
+        # 전체를 넘긴다 — _apply_updates가 베이스라인 반영 + 공헌이익 파생까지 처리
+        _apply_updates(merchant, {k: str(v) for k, v in recorded.items()},
+                       source="checkin")
         ChatMessage.objects.create(
             merchant=merchant, role="system",
             text="주간 체크인 기록: " + ", ".join(f"{k} {v}" for k, v in recorded.items()))
@@ -368,3 +393,23 @@ class ActionDetailView(APIView):
         act.status = to
         act.save()
         return Response({**_action_payload(act), "note": note})
+
+
+class BenchmarkView(APIView):
+    """업종 벤치마크 차분(루프 ⑤) — '내 증가율 vs 동종업종 중앙값'으로 계절성 통제.
+
+    익명 집계만 반환(개별 업체 값 미노출). 표본 n < MIN_SAMPLE이면 업종 값은
+    숨기고 n만 공개해 '언제 열리는지'를 정직하게 보여준다. 순수 DB 연산 — 무과금.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        merchant = _merchant(request, request.query_params.get("merchant_id"))
+        return Response({
+            "industry": merchant.industry,
+            "industry_label": merchant.get_industry_display(),
+            "window_days": WINDOW_DAYS,
+            "min_sample": MIN_SAMPLE,
+            "rows": benchmark_rows(merchant),
+        })

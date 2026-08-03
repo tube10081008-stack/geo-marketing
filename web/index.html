@@ -198,13 +198,14 @@
   <aside class="side">
     <div class="logo"><b>GEO</b><span>Marketing Intelligence</span></div>
     <div class="ws" id="wsCard">
-      <div class="name"><span id="wsName">내 가게</span><span class="grade-pill" id="wsGrade" hidden>—</span></div>
+      <div class="name"><span id="wsName">내 가게</span><span class="grade-pill" id="wsGrade" hidden>—</span><span class="grade-pill" id="wsEvidence" hidden title="이 업종은 직접 실증 연구가 아직 없어, 인접 업종 근거를 옮겨와 조언합니다.">간접근거</span></div>
       <div class="sub" id="wsSub">데이터 미등록 · 데모 모드</div>
     </div>
     <nav>
       <a href="#overview" class="on"><span class="ico">▦</span>개요</a>
       <a href="#chat"><span class="ico">◧</span>에이전트 대화</a>
       <a href="#actions"><span class="ico">▤</span>실행 액션</a>
+      <a href="#bench"><span class="ico">◫</span>업종 벤치마크</a>
     </nav>
     <div class="spacer"></div>
     <div class="status">
@@ -238,6 +239,7 @@
         <input id="ckRating" placeholder="평점 (예: 4.8)" inputmode="decimal" />
         <input id="ckReviews" placeholder="리뷰수 (예: 78)" inputmode="numeric" />
         <input id="ckRevenue" placeholder="월매출 원 (선택)" inputmode="numeric" />
+        <input id="ckCostRatio" placeholder="변동비율 % (선택)" inputmode="decimal" />
         <button class="btn tiny" id="ckSave">기록</button>
         <button class="btn tiny ghost" id="ckSkip">다음에</button>
       </div>
@@ -277,6 +279,12 @@
       <div class="acts" id="actGrid"></div>
       <div class="footnote">근거 수치는 원 연구의 맥락(주로 해외 데이터) 기준의 방향성 지침입니다. 실제 효과는 이 가게의 실측 A/B로 검증하며, 데모(stub) 응답에는 포인트가 차감되지 않습니다.</div>
     </section>
+
+    <section class="sec" id="benchSec" hidden>
+      <div class="sec-head" id="bench"><h2>업종 벤치마크</h2><span class="hint">내 증가율 vs 동종업종 중앙값 · 익명 집계 · 계절성 통제</span></div>
+      <div class="acts" id="benchGrid"></div>
+      <div class="footnote">같은 업종 가입 업체들의 최근 90일 증가율을 익명 집계한 값입니다. 개별 업체 정보는 노출되지 않으며, 표본이 10곳 미만인 지표는 왜곡 방지를 위해 표본이 찰 때까지 업종 값을 숨깁니다. '차분(%p)'이 업종 전체 흐름(계절 특수 등)을 뺀 순수 개선 신호입니다.</div>
+    </section>
   </main>
 </div>
 
@@ -302,6 +310,7 @@
         </div>
         <div class="row2">
           <div class="field"><label>월 매출(원)</label><input name="monthly_revenue" inputmode="numeric" placeholder="30000000" /></div>
+          <div class="field"><label>변동비율(%) <span class="hint">재료비+수수료</span></label><input name="variable_cost_ratio" inputmode="decimal" placeholder="35" /></div>
           <div class="field"><label>90일 목표 성장률(%)</label><input name="growth_goal" inputmode="decimal" placeholder="15" /></div>
         </div>
       </div>
@@ -384,6 +393,14 @@ const PERSONA = {
   cora:{name:'세무', color:'#b45309', hex:'#b45309'},
 };
 const GRADE_COLOR = {A:'#008300', B:'#65A30D', C:'#D97706', D:'#e34948'};
+// 직접 실증 근거가 없는 업종 — 백엔드 chat.INDIRECT_EVIDENCE_INDUSTRIES와 정합
+const INDIRECT_EVIDENCE = ['beauty','service','etc'];
+function showEvidenceBadge(industry){
+  const p = $('#wsEvidence'); if (!p) return;
+  const indirect = INDIRECT_EVIDENCE.includes(industry);
+  p.hidden = !indirect;
+  if (indirect) p.style.background = '#D97706';
+}
 const FIELD_LABELS = {avg_rating:'평점', review_count:'리뷰수', place_clicks:'플레이스클릭',
   aov:'객단가', monthly_customers:'월 고객수', revisit_rate:'재방문율', regular_ratio:'단골비중',
   visit_to_purchase_rate:'전환율', nps:'NPS'};
@@ -460,11 +477,14 @@ f.addEventListener('submit', async (e) => {
   const question = fd.get('question') || '';
   const fields = {};
   ['place_clicks','review_count','avg_rating','monthly_revenue','monthly_customers',
-   'aov','revisit_rate','regular_ratio'].forEach(k => fields[k] = fd.get(k));
+   'aov','revisit_rate','regular_ratio','variable_cost_ratio'].forEach(k => fields[k] = fd.get(k));
   // 객단가 미입력 시 매출÷고객수 자동계산(양 모드 공통)
   if (!num(fields.aov) && num(fields.monthly_revenue) && num(fields.monthly_customers))
     fields.aov = String(Math.round(num(fields.monthly_revenue)/num(fields.monthly_customers)));
   window._ctx = { merchant, fields };
+  // 직접 실증 근거가 없는 업종이면 '간접근거' 배지를 띄운다(에이전트도 같은 사실을 고지)
+  const industry = fd.get('industry') || 'etc';
+  showEvidenceBadge(industry);
 
   go.disabled = true; go.textContent = '분석 중…';
   try {
@@ -472,9 +492,10 @@ f.addEventListener('submit', async (e) => {
     if (auth) {
       // Django: 업체 생성/수정 → advise
       const payload = {
-        name: merchant, industry: fd.get('industry')||'etc', location: fd.get('location')||'',
+        name: merchant, industry: industry, location: fd.get('location')||'',
         consent_data_processing: true,
         ...(num(fields.monthly_revenue)!=null ? {monthly_revenue: num(fields.monthly_revenue)} : {}),
+        ...(num(fields.variable_cost_ratio)!=null ? {variable_cost_ratio: String(fields.variable_cost_ratio)} : {}),
         acquisition: { data_grade: gradeOf(fields.avg_rating, fields.review_count, fields.place_clicks),
           ...(num(fields.place_clicks)!=null ? {place_clicks:num(fields.place_clicks)} : {}),
           ...(num(fields.review_count)!=null ? {review_count:num(fields.review_count)} : {}),
@@ -587,6 +608,30 @@ async function refreshActions(){
     renderActions(list);
   } catch(e){}
 }
+
+/* ── 업종 벤치마크(루프 ⑤): 내 증가율 vs 동종업종 중앙값 — 계절성 통제 차분 ── */
+async function refreshBenchmark(){
+  if (!auth || !mid) return;
+  try {
+    const d = await api('/agents/benchmark/?merchant_id=' + mid);
+    if (!d.rows || !d.rows.length) { $('#benchSec').hidden = true; return; }
+    $('#benchGrid').innerHTML = d.rows.map(r => {
+      const pct = v => `${v>0?'+':''}${v}%`;
+      let cmp;
+      if (r.hidden)
+        cmp = `<div class="delta">업종(${esc(d.industry_label)}) 집계 대기 — 표본 ${r.n}/${d.min_sample}곳. `
+            + `왜곡 방지를 위해 표본이 차면 자동 공개돼요.</div>`;
+      else
+        cmp = `<div class="delta">업종 중앙값 ${pct(r.industry_pct)} → 차분 <b>${r.diff_pct>0?'+':''}${r.diff_pct}%p</b> (n=${r.n}) · `
+            + `${r.diff_pct>=0?'업종 흐름보다 앞서는 신호':'업종 흐름 대비 뒤처짐 — 실행 액션 점검'}</div>`;
+      return `<div class="act">
+        <div class="top"><span class="kpi-tag">최근 ${d.window_days}일 · ${esc(d.industry_label)}</span></div>
+        <div class="body"><b>${esc(r.label)}</b> 내 증가율 ${pct(r.mine_pct)}</div>${cmp}
+      </div>`;
+    }).join('');
+    $('#benchSec').hidden = false;
+  } catch(e){}
+}
 $('#actGrid').addEventListener('click', async e => {
   const b = e.target.closest('button[data-cmd]'); if (!b) return;
   const ctl = b.closest('.act-ctl'), id = ctl.dataset.id;
@@ -607,7 +652,7 @@ $('#actGrid').addEventListener('click', async e => {
 });
 
 function renderKpis() {
-  const x = (window._ctx && window._ctx.fields) || {};
+  let x = (window._ctx && window._ctx.fields) || {};
   const has = Object.values(x).some(v => v !== '' && v != null);
   if (!has) { $('#kpis').hidden = true; return; }
   const tiles = [
@@ -615,8 +660,14 @@ function renderKpis() {
     ['monthly_customers','월 고객수','명','cvr'], ['aov','객단가','원','cvr'],
     ['revisit_rate','재방문율','%','ret'], ['regular_ratio','단골비중','%','ret'],
   ];
+  // 목적함수는 매출이 아니라 공헌이익 — 원가율을 알면 주문당 공헌이익을 함께 보여준다
+  const vcr = num(x.variable_cost_ratio), aov = num(x.aov);
+  if (vcr != null && aov != null) {
+    x = Object.assign({}, x, {unit_cm: String(Math.round(aov * (100 - vcr) / 100))});
+    tiles.push(['unit_cm','주문당 공헌이익','원','cvr']);
+  }
   $('#kpis').innerHTML = tiles.map(([k,label,unit,p]) => {
-    const v = x[k]; const disp = (k==='aov'||k==='monthly_customers') ? fmt(v) : (v==null||v===''?'—':v);
+    const v = x[k]; const disp = (k==='aov'||k==='monthly_customers'||k==='unit_cm') ? fmt(v) : (v==null||v===''?'—':v);
     return `<div class="kpi">
       <div class="lab"><i style="background:${PERSONA[p].color}"></i>${label}</div>
       <div class="val">${disp}<small>${unit}</small></div></div>`;
@@ -760,16 +811,19 @@ async function loadWorkspace(){
       window._ctx = { merchant: m.name, fields: {
         avg_rating: a.avg_rating ?? '', review_count: a.review_count ?? '',
         place_clicks: a.place_clicks ?? '', monthly_revenue: m.monthly_revenue ?? '',
+        variable_cost_ratio: m.variable_cost_ratio ?? '',
         monthly_customers: cv.monthly_customers ?? '', aov: cv.aov ?? '',
         revisit_rate: rt.revisit_rate ?? '', regular_ratio: rt.regular_ratio ?? '' } };
       $('#pageTitle').textContent = m.name; $('#wsName').textContent = m.name;
       const g = m.overall_data_grade;
       if (g) { const p = $('#wsGrade'); p.hidden = false; p.textContent = '데이터 ' + g;
                p.style.background = GRADE_COLOR[g] || '#9AA3B5'; }
+      showEvidenceBadge(m.industry);
       $('#wsSub').textContent = '서버 저장됨 · 모든 기기에서 이어보기';
       $('#emptyBanner').hidden = true;
       renderKpis();
       refreshActions();  // 액션 티켓(조언→실측 루프) 상태판 복원
+      refreshBenchmark();  // 업종 벤치마크(루프 ⑤) — 내 추세가 있으면 표시
       // 주간 체크인: 마지막 측정 7일 경과 시 30초 측정 바 노출
       api('/agents/checkin/?merchant_id='+mid)
         .then(s => { if (s.due && !sessionStorage.getItem('ckSkip')) $('#checkinBar').hidden = false; })
@@ -863,7 +917,8 @@ $('#ckSave').addEventListener('click', async () => {
   const body = { merchant_id: mid };
   const vals = { avg_rating: $('#ckRating').value.trim(),
                  review_count: $('#ckReviews').value.trim(),
-                 monthly_revenue: $('#ckRevenue').value.replace(/,/g,'').trim() };
+                 monthly_revenue: $('#ckRevenue').value.replace(/,/g,'').trim(),
+                 variable_cost_ratio: $('#ckCostRatio').value.trim() };
   Object.entries(vals).forEach(([k,v]) => { if (v) body[k] = v; });
   if (Object.keys(body).length === 1) { toast('숫자를 하나 이상 입력해주세요'); return; }
   try {
@@ -871,7 +926,9 @@ $('#ckSave').addEventListener('click', async () => {
     $('#checkinBar').hidden = true;
     if (d.recorded.avg_rating) window._ctx.fields.avg_rating = d.recorded.avg_rating;
     if (d.recorded.review_count) window._ctx.fields.review_count = d.recorded.review_count;
+    if (d.recorded.variable_cost_ratio) window._ctx.fields.variable_cost_ratio = d.recorded.variable_cost_ratio;
     renderKpis();
+    refreshBenchmark();  // 새 측정으로 추세가 바뀌었을 수 있다
     sysBubble('주간 체크인 기록 완료 — 추세에 반영됐어요. 진행 중 액션의 실측에도 사용됩니다.');
     toast('체크인 기록 ✓', 4000);
   } catch (e) { toast('체크인 실패: ' + e.message, 6000); }

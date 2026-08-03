@@ -52,7 +52,7 @@ class MerchantIntakeSerializer(serializers.ModelSerializer):
         model = Merchant
         fields = [
             "id", "name", "industry", "sub_category", "location",
-            "monthly_revenue", "capacity", "business_days_per_week",
+            "monthly_revenue", "variable_cost_ratio", "capacity", "business_days_per_week",
             "channels", "growth_goal_pct", "consent_data_processing",
             "acquisition", "conversion", "retention",
             "overall_data_grade", "created_at",
