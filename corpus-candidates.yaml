@@ -1,0 +1,170 @@
+# 코퍼스 편입 후보 — SCREENING.md 기준으로 심사됨. 아직 [M#] 미부여(레지스트리 권한).
+# 판정은 backend/agents/screening.py가 재계산한 값. 서지·효과크기는 2026-08 웹 교차검증.
+# 공통 한계: 원문 전체(방법·표본·신뢰구간) 미확인 → verification=abstract_only, V상한 0.6.
+#            따라서 어떤 후보도 experiment_candidate(V>=0.7)에 도달할 수 없다.
+
+candidates:
+- candidate_id: "dayan-barhillel-2011-nudge-to-nobesity-ii"
+  corpus_id: null
+  bibliography:
+    title: "Nudge to nobesity II: Menu positions influence food orders"
+    authors: ["Eran Dayan", "Maya Bar-Hillel"]
+    publication_year: 2011
+    journal_or_publisher: "Judgment and Decision Making, 6(4), 333–342"
+    doi: null
+    publication_type: journal_article
+    study_design: quasi_experiment   # 실험실 1 + 실제 매장 1 (무작위화 세부 미확인)
+  verification:
+    status: abstract_only
+    sources: ["Cambridge Core (JDM)", "sjdm.org 원문 페이지", "Semantic Scholar"]
+    full_text_available: true        # 공개 PDF 존재 → 전문 검증으로 승격 가능
+    retraction_or_concern: false
+    notes: "서지·핵심주장 일치. 표본수·신뢰구간·무작위화 절차 미확인."
+  claim_evaluations:
+    - claim_id: "C1"
+      focal_claim: "메뉴 목록의 처음·끝 위치에 놓인 항목이 중앙 위치일 때보다 더 자주 선택되었다"
+      evidence:
+        observed_evidence: "위치를 조작했을 때 첫/끝 항목이 중앙 대비 최대 2배까지 선택됨"
+        effect_estimate: "최대 2배 (초록 기준, 조건별 세부수치 미확인)"
+        causal_or_associational: causal
+      scores: {relevance: 1.0, internal_validity: 0.6, transferability: 0.6,
+               actionability: 1.0, measurability: 1.0, profit_proximity: 0.5,
+               safety_counterevidence_value: 0.1, verification_confidence: 0.6}
+      calculated_scores: {product_utility: 0.7860, evidence_strength: 0.6000,
+                          final_weight: 0.4716}
+      roles: ["hypothesis_generator"]
+      primary_role: hypothesis_generator
+      deployment_status: local_test_only
+      claims_control:
+        allowed_claims:
+          - "메뉴상 위치가 항목 선택 빈도와 관련된다는 현장 근거가 있다"
+          - "우리 매장에서 검증해볼 가치가 있는 가설이다"
+        forbidden_claims:
+          - "고마진 메뉴를 맨 위에 두면 이익이 반드시 늘어난다"
+          - "메뉴 순서만 바꿔도 매출이 오릅니다"
+      safety_review:
+        critical_risk: false
+        risks:
+          - type: customer_trust
+            description: "고마진 유도가 노골적이면 고객 신뢰 훼손"
+            mitigation: "품질 만족도가 낮은 메뉴는 상단 배치 대상에서 제외"
+      executable_hypothesis:
+        evidence_relation: adapted_from_study
+        action: "고공헌이익 시그니처 메뉴를 메뉴판 첫 번째 또는 마지막 위치로 이동"
+        comparator: "이전 배치 기간(요일·날씨 보정)"
+        primary_kpi: "메뉴믹스 기반 주문당 공헌이익"
+        secondary_kpis: ["해당 메뉴 판매 비중", "객단가"]
+        guardrail_metrics: ["전체 객단가 하락", "저마진 메뉴로의 이동", "품절·대기시간"]
+        minimum_test_window: "매장 기준선과 주문량으로 사전 설정 필요(검정력 계산)"
+        stop_loss_condition: "매장 기준선으로 사전 설정 필요"
+        local_validation_required: true
+
+- candidate_id: "buell-kim-tsay-2017-operational-transparency"
+  corpus_id: null
+  bibliography:
+    title: "Creating Reciprocal Value Through Operational Transparency"
+    authors: ["Ryan W. Buell", "Tami Kim", "Chia-Jung Tsay"]
+    publication_year: 2017
+    journal_or_publisher: "Management Science, 63(6), 1673–1695"
+    doi: "10.1287/mnsc.2015.2411"
+    publication_type: journal_article
+    study_design: field_rct          # 현장실험 2 + 실험실 2 (제안 설명보다 강한 설계)
+  verification:
+    status: abstract_only
+    sources: ["INFORMS PubsOnline", "HBS Faculty & Research", "SSRN"]
+    full_text_available: true
+    retraction_or_concern: false
+    notes: "서지·DOI·효과크기 일치. 현장 2 + 실험실 2 구성 확인. 표본·식별가정 미확인."
+  claim_evaluations:
+    - claim_id: "C1"
+      focal_claim: "고객이 조리과정을, 조리자가 고객을 상호 관찰하면 품질 인식과 서비스 효율이 향상된다"
+      evidence:
+        observed_evidence: "식음료 현장·실험실 실험에서 고객보고 품질 +22.2%, 처리시간 -19.2%"
+        effect_estimate: "품질인식 +22.2%, 처리시간 -19.2%"
+        causal_or_associational: causal
+      scores: {relevance: 0.8, internal_validity: 0.7, transferability: 0.5,
+               actionability: 0.7, measurability: 0.5, profit_proximity: 0.4,
+               safety_counterevidence_value: 0.1, verification_confidence: 0.6}
+      calculated_scores: {product_utility: 0.5619, evidence_strength: 0.6481,
+                          final_weight: 0.3642}
+      roles: ["hypothesis_generator"]
+      primary_role: hypothesis_generator
+      deployment_status: local_test_only
+      claims_control:
+        allowed_claims:
+          - "조리과정의 상호 가시성이 고객 품질 인식을 높인 식음료 현장실험 근거가 있다"
+          - "처리시간 단축이 함께 관찰되었다"
+        forbidden_claims:
+          - "오픈 주방을 만들면 카페 매출이 오른다"
+          - "만족도가 오르면 재방문이 늘어난다"
+      safety_review:
+        critical_risk: false
+        risks:
+          - type: operations
+            description: "가시성 노출이 피크타임 직원 부담·위생 리스크를 키울 수 있음"
+            mitigation: "피크타임 제외 시간대부터 시범 적용, 위생 점검 병행"
+      executable_hypothesis:
+        evidence_relation: adapted_from_study
+        action: "제조 과정 가시화(오픈 바 동선, 드립 시연, '지금 내려드리는 중' 표시)"
+        primary_kpi: "재방문율"
+        secondary_kpis: ["리뷰 내 품질 언급", "주문 처리시간(POS 타임스탬프)"]
+        guardrail_metrics: ["피크타임 대기시간", "직원 과부하", "위생 점검 결과"]
+        minimum_test_window: "매장 기준선으로 사전 설정 필요"
+        stop_loss_condition: "매장 기준선으로 사전 설정 필요"
+        local_validation_required: true
+
+- candidate_id: "strohmetz-2002-sweetening-the-till"
+  corpus_id: null
+  bibliography:
+    title: "Sweetening the Till: The Use of Candy to Increase Restaurant Tipping"
+    authors: ["David B. Strohmetz", "Bruce Rind", "Reed Fisher", "Michael Lynn"]
+    publication_year: 2002
+    journal_or_publisher: "Journal of Applied Social Psychology, 32(2), 300–309"
+    doi: "10.1111/j.1559-1816.2002.tb00216.x"
+    publication_type: journal_article
+    study_design: field_rct
+  verification:
+    status: abstract_only
+    sources: ["Wiley Online Library", "Cornell eCommons", "Semantic Scholar"]
+    full_text_available: true
+    retraction_or_concern: false
+    notes: "서지·효과크기 일치(팁 15.06%→17.84%). 표본·무작위화 절차 미확인."
+  claim_evaluations:
+    - claim_id: "C1"
+      focal_claim: "계산서와 함께 소량의 사탕을 증정하면 팁 비율이 상승한다"
+      evidence:
+        observed_evidence: "미국 레스토랑 현장실험 2건. 팁 15.06% → 17.84%(약 +18% 상대)"
+        effect_estimate: "팁 비율 +2.78%p (15.06% → 17.84%)"
+        causal_or_associational: causal
+      scores: {relevance: 1.0, internal_validity: 0.6, transferability: 0.4,
+               actionability: 0.8, measurability: 0.7, profit_proximity: 0.3,
+               safety_counterevidence_value: 0.1, verification_confidence: 0.6}
+      calculated_scores: {product_utility: 0.5827, evidence_strength: 0.6000,
+                          final_weight: 0.3496}   # hypothesis_generator 문턱 0.35에 0.0004 미달
+      roles: ["context_qualifier"]
+      primary_role: context_qualifier
+      deployment_status: evidence_context_only
+      transfer_inference:
+        applicability: "호혜성 메커니즘 자체는 전이 가능"
+        limitations:
+          - "결과변수(팁)가 한국에 존재하지 않는다 — 원 연구의 효과를 그대로 인용할 수 없음"
+          - "증정품 원가가 공헌이익을 직접 잠식한다(원 연구는 이 비용을 다루지 않음)"
+      claims_control:
+        allowed_claims:
+          - "식음료 매장 현장실험에서 작은 무료 증정이 호혜 반응(팁)을 높인 사례가 있다"
+        forbidden_claims:
+          - "무료 샘플을 주면 카페 이익이 증가한다"
+          - "사탕을 주면 재방문이 늘어납니다"
+      safety_review:
+        critical_risk: false
+        risks:
+          - type: profit
+            description: "증정 원가 + 정상가 디저트 매출 잠식으로 공헌이익 훼손 가능"
+            mitigation: "증정원가 차감 후 공헌이익을 1차 KPI로 설정, 잠식률 보호지표화"
+      executable_hypothesis: null   # 결과변수 전이 불가 → 강제 생성 금지(SCREENING.md §6)
+
+# 제외 결정 기록
+excluded:
+  - authors: ["Brian Wansink"]
+    reason: "18편 철회 + Cornell 연구부정 인정(2018) — 원 데이터 부재로 결과 타당성 보증 불가"
+    rule: "SCREENING.md V=0.0 (철회·조작), primary_role=rejected"
