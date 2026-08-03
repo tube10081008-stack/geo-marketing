@@ -406,7 +406,21 @@ const FIELD_LABELS = {avg_rating:'평점', review_count:'리뷰수', place_click
   visit_to_purchase_rate:'전환율', nps:'NPS'};
 const SKEY = 'geo_session_v4';
 const AKEY = 'geo_auth_v1';
-const BACKEND = 'https://geo-marketing-api.onrender.com/api/v1';
+/* 백엔드 주소. Render 서비스명이 기본값과 다르면 프런트를 재배포하지 않고 바꿀 수 있다:
+   ?api=https://내서비스.onrender.com  → localStorage에 저장되어 이후에도 유지된다.
+   (https만 허용 — 배포된 https 페이지에서 http를 부르면 브라우저가 막는다) */
+const BKEY = 'geo_api_base';
+const BACKEND = (() => {
+  const DEFAULT = 'https://geo-marketing-api.onrender.com';
+  let base = null;
+  try {
+    const q = new URLSearchParams(location.search).get('api');
+    if (q) { base = q; localStorage.setItem(BKEY, q); }
+    else base = localStorage.getItem(BKEY);
+  } catch (e) {}
+  if (!base || !/^https:\/\/[^\s/]+$/.test(base.replace(/\/+$/, ''))) base = DEFAULT;
+  return base.replace(/\/+$/, '') + '/api/v1';
+})();
 
 const $ = s => document.querySelector(s);
 let auth = null;   // {token, username}
