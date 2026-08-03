@@ -178,17 +178,46 @@ def _sanitize_citations(reply, persona):
     return cleaned.strip(), used
 
 
-# 2인 협업 시 두 번째 답변이 첫 답변과 이만큼 겹치면 중복으로 간주하고 잘라낸다.
-# (프롬프트의 '복사 금지' 규칙만으로는 막히지 않았다 — 코드로 집행)
-DUPLICATE_RATIO = 0.6
+# 2인 협업 중복 판정. 문자 단위(복붙)와 어휘 단위(같은 내용을 다른 말로) 둘 다 본다.
+# 실측 근거: 부정리뷰 2인 답변이 '같은 3가지'를 말했는데 문자유사도는 0.489로
+# 임계(0.6)를 통과했다. 어휘 자카드는 중복 0.348 vs 비중복 최대 0.125로 깨끗이 갈린다.
+DUPLICATE_RATIO = 0.6      # 문자 단위 — 사실상 복붙
+DUPLICATE_JACCARD = 0.28   # 어휘 단위 — 표현만 바꾼 같은 내용
 _DUPLICATE_NOTICE = "덧붙일 내용은 없습니다."
+_TOKEN_RE = re.compile(r"\[[MT]\d+\]|[^가-힣a-zA-Z0-9 ]")
+
+
+def _content_tokens(text):
+    """인용 토큰·문장부호를 걷어낸 내용어 집합(2자 이상)."""
+    return {w for w in _TOKEN_RE.sub(" ", text or "").split() if len(w) >= 2}
 
 
 def _is_duplicate(reply, previous):
     """직전 동료 답변과 과도하게 겹치는가(복붙·요약반복 방지)."""
     if not reply or not previous:
         return False
-    return SequenceMatcher(None, reply, previous).ratio() >= DUPLICATE_RATIO
+    if SequenceMatcher(None, reply, previous).ratio() >= DUPLICATE_RATIO:
+        return True
+    a, b = _content_tokens(reply), _content_tokens(previous)
+    union = a | b
+    return bool(union) and len(a & b) / len(union) >= DUPLICATE_JACCARD
+
+
+# 페르소나별 출력 상한(토큰). 프롬프트의 분량 규율이 무시될 때의 최후 방어선이자
+# 비용 통제 장치다. 한국어는 대략 1.5~2자/토큰이라 상한을 목표 글자수보다 여유 있게
+# 잡아, 규율을 지킨 답변은 절대 잘리지 않고 폭주한 답변만 걸리게 한다.
+# (절단 시 llm.py가 '이어서' 안내를 자동 부착한다)
+_MAX_TOKENS = {
+    "acq": 512, "cvr": 512, "ret": 512,   # 목표 400자
+    "fugu": 700,                           # 목표 600자 — 퍼널 3분할 진단이 필요
+}
+
+
+def _max_tokens_for(persona):
+    """코라는 일정·체크리스트형이라 상한 3배를 유지한다."""
+    if persona == "cora":
+        return CHAT_MAX_TOKENS * 3
+    return _MAX_TOKENS.get(persona, CHAT_MAX_TOKENS)
 
 
 def route(message, forced, provider, meter):
@@ -264,7 +293,8 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
                   "베이스라인에서 어느 지표가 빠졌는지 짚고, 모르면 그 숫자를 되물어라.\n"
                   "[범위 경계] 채용·노무·임대차·인테리어·법무는 이 팀의 영역이 아니다. 그런 질문엔 "
                   "아는 척하지 말고 영역 밖임을 밝힌 뒤, 마케팅으로 도울 수 있는 부분만 제안하라. "
-                  "세금·세무는 🧾 코라(Cora)에게 넘겨라.")
+                  "세금·세무는 🧾 코라(Cora)에게 넘겨라.\n"
+                  "[분량] 600자 이내. 퍼널 진단도 항목당 한 줄로 압축하라.")
     else:
         label, kpi = _label(persona)
         cites = "\n".join(f"- [{e.mid}] {e.claim} ({e.cite})" for e in retrieve(persona))
@@ -276,7 +306,9 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
                 f"베이스라인: {_card_summary(card)}.\n"
                 f"근거 코퍼스(관련 시 반드시 [M#] 인용):\n{cites}\n"
                 f"네 영역 밖이면 {others} 에이전트에게, 세금·세무 질문이면 🧾 코라(Cora)에게 넘기라고 안내하라.\n"
-                "사장님과 대화하듯 간결하고 실행가능하게 답하라. 2~4문장. 출처를 댈 수 없는 단정은 금지.")
+                "사장님과 대화하듯 간결하고 실행가능하게 답하라. 출처를 댈 수 없는 단정은 금지.\n"
+                "[분량 — 반드시 지켜라] 답변 전체를 400자 이내로 써라. 번호 목록은 최대 2개까지만. "
+                "사장님은 바쁘다 — 배경 설명·일반론을 빼고 지금 할 일만 남겨라.")
         if report_note:
             base += f"\n\n[최신 딥리포트(발췌) — 사장님이 언급한 리포트]\n{report_note}"
     if actions_note and persona != "cora":
@@ -310,9 +342,12 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
     if summary:
         base += f"\n\n[장기기억 — 이전 대화 요약]\n{summary[:SUMMARY_MAX_CHARS]}"
     if collab:
+        _, my_kpi = _label(persona) if persona in PERSONA_META else ("", "")
         base += (f"\n\n[협업] 동료 에이전트가 먼저 답했다:\n\"{collab}\"\n"
-                 "동료 답변을 재인용·복사·요약반복하지 마라. 네 전문영역에서 보탤 내용만 1~3문장. "
-                 "보탤 것이 없으면 '덧붙일 내용은 없습니다' 한 문장으로만 끝내라.")
+                 f"너는 **{my_kpi}** 관점에서만 답한다. 동료가 이미 말한 실행안을 "
+                 "표현만 바꿔 반복하는 것은 금지다 — 같은 조언을 두 번 읽게 하면 안 된다. "
+                 "동료가 다루지 않은 각도(네 KPI가 걸린 지점)가 있을 때만 1~3문장으로 보태라. "
+                 "겹치지 않는 각도가 없으면 '덧붙일 내용은 없습니다' 한 문장으로만 끝내라.")
     return base
 
 
@@ -340,10 +375,8 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
                          summary=merchant.chat_summary, report_note=note,
                          actions_note=actions_note, benchmark_note=benchmark_note,
                          message=message)
-        # 코라는 일정·체크리스트형 답이 길다 — 상한 3배 + 프롬프트 길이규율 + 절단감지 3중 방어
         reply, usage = provider.chat(
-            system=system, messages=messages,
-            max_tokens=CHAT_MAX_TOKENS * 3 if p == "cora" else CHAT_MAX_TOKENS)
+            system=system, messages=messages, max_tokens=_max_tokens_for(p))
         meter.add(usage)
         # 검증된 인용만: 본문의 [M#]/[T#] 중 이 담당 코퍼스에 실재하는 것만 남기고
         # 나머지(환각·오배정)는 본문·칩에서 제거 → 정직 원칙을 코드로 강제.

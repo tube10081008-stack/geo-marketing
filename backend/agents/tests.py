@@ -1,5 +1,6 @@
 """업종 벤치마크 차분(루프 ⑤) 테스트 — 익명 집계·표본 게이트·중앙값·정직 규칙."""
 from datetime import timedelta
+from difflib import SequenceMatcher
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,15 +21,16 @@ from .benchmark import MIN_SAMPLE, MIN_SPAN_DAYS, benchmark_note, benchmark_rows
 from .corpus import retrieve
 from .notes import MAX_NOTES, _load_notes, notes_block, relevant_mids
 from .chat import (
-    INDIRECT_EVIDENCE_INDUSTRIES, _is_duplicate, _sanitize_citations, _system,
-    extract_updates, route, run_chat,
+    DUPLICATE_RATIO, INDIRECT_EVIDENCE_INDUSTRIES, _is_duplicate,
+    _max_tokens_for, _sanitize_citations, _system, extract_updates, route,
+    run_chat,
 )
 from .views import AdviseView
 from .screening import (
     ClaimScores, classify_roles, deployment_status, evidence_strength,
     final_weight, primary_role, product_utility,
 )
-from .llm import Meter, Usage, get_provider
+from .llm import CHAT_MAX_TOKENS, Meter, Usage, get_provider
 
 User = get_user_model()
 
@@ -550,3 +552,85 @@ class RoutingCoverageTest(TestCase):
         cvr_mids = [e.mid for e in retrieve("cvr")]
         self.assertTrue(relevant_mids("객단가를 올리고 싶어요", cvr_mids))
         self.assertTrue(relevant_mids("세트 메뉴를 만들면 도움이 될까요?", cvr_mids))
+
+
+class CollabAndLengthTest(TestCase):
+    """실전 감사 후속 — 협업 중복(의미 단위)과 분량 규율."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("cl", password="pass1234!")
+        self.m = Merchant.objects.create(
+            owner=self.user, name="협업카페", industry="cafe", location="서울")
+
+    def test_observed_collab_duplicate_caught(self):
+        """실측 회귀 — Gemini 20문 감사 #14에서 두 담당이 같은 3가지를 말했던 실제 답변.
+
+        문자유사도 0.489로 임계(0.6)를 통과해 그대로 노출됐던 케이스다.
+        (원문 축약본 — 어휘 분포는 보존)
+        """
+        a = ("부정 리뷰는 사장님께 속상한 일이지만, '연남살롱'의 온라인 평판을 관리하고 개선하는 "
+             "중요한 기회가 될 수 있습니다.\n"
+             "1. 신속하고 정중한 답변: 부정적인 리뷰에도 최대한 빨리, 정중하고 사과하는 태도로 "
+             "답변하는 것이 중요합니다. 이는 다른 잠재 고객들에게 '연남살롱'이 고객의 의견을 "
+             "소중히 여기고 문제 해결에 적극적이라는 인상을 줍니다.\n"
+             "2. 구체적인 해결 노력 제안: 단순히 사과로 끝내지 않고, 문제 해결을 위한 구체적인 "
+             "노력이나 제안을 함께 언급하는 것이 좋습니다.")
+        b = ("부정 리뷰는 '연남살롱'에게 개선의 기회이며, 신속하고 현명한 대응이 중요합니다 [M13].\n"
+             "1. 신속하고 정중한 답변: 부정적인 리뷰에는 최대한 빨리, 진심으로 사과하는 태도로 "
+             "답변하는 것이 좋습니다. 다른 고객들에게 '연남살롱'이 고객의 의견을 소중히 여긴다는 "
+             "인상을 줄 수 있습니다 [M13].\n"
+             "2. 구체적인 해결 노력 제안 및 오프라인 대화 유도: 단순히 사과에 그치지 않고, "
+             "불편하셨던 점을 해결해드리기 위해 노력하겠습니다.")
+        self.assertTrue(_is_duplicate(a, b))
+
+    def test_jaccard_branch_catches_low_char_similarity(self):
+        """문자유사도가 임계 아래여도 어휘가 겹치면 잡는다(자카드 분기 단독 검증).
+
+        실측 #14 전문의 프로필이 이 구간(문자 0.489 / 자카드 0.348)이었다.
+        """
+        a = ("리뷰에 신속하게 답변하고 구체적인 개선 노력을 제안하세요. "
+             "매장으로 초대해 직접 소통하면 오해를 풀 수 있습니다.")
+        b = ("구체적인 개선 노력을 제안하고 리뷰에 신속하게 답변하는 것이 좋습니다. "
+             "직접 소통하면 오해를 풀 수 있으니 매장으로 초대해 보세요. 진심이 전달됩니다.")
+        self.assertLess(SequenceMatcher(None, a, b).ratio(), DUPLICATE_RATIO)
+        self.assertTrue(_is_duplicate(a, b))
+
+    def test_full_paraphrase_is_a_known_limitation(self):
+        """정직 고지 — 어휘가 완전히 갈리는 전면 재서술은 이 방식으로 못 잡는다.
+
+        이 경우의 1차 방어는 코드가 아니라 프롬프트의 '각도 분리'(협업 지시)다.
+        임계를 더 낮추면 서로 다른 주제까지 중복으로 오판하므로 낮추지 않는다.
+        """
+        a = "부정 리뷰에는 최대한 빨리 정중하게 답변하세요."
+        b = "악평에 신속히 사과하는 태도로 응대하십시오."
+        self.assertFalse(_is_duplicate(a, b))   # 잡히지 않는다 — 알려진 한계
+
+    def test_different_topics_not_duplicate(self):
+        """주제가 다르면 중복이 아니다(오탐 방지)."""
+        a = "신규 손님을 늘리려면 플레이스 노출과 리뷰 확보가 먼저입니다."
+        b = "객단가는 세트 구성과 업셀링으로 올릴 수 있습니다."
+        self.assertFalse(_is_duplicate(a, b))
+
+    def test_citation_tokens_ignored_in_comparison(self):
+        """인용 번호 차이만으로 중복 판정이 흔들리지 않는다."""
+        a = "재방문율을 높이려면 적립 설계가 중요합니다 [M17]."
+        b = "재방문율을 높이려면 적립 설계가 중요합니다 [M19]."
+        self.assertTrue(_is_duplicate(a, b))
+
+    def test_collab_prompt_demands_distinct_angle(self):
+        """협업 2번째 담당에게 '표현만 바꿔 반복 금지'와 자기 KPI 각도를 지시한다."""
+        s = _system("ret", self.m, self.m.baseline_card(), collab="🎣 획득: 리뷰에 빨리 답하세요")
+        self.assertIn("표현만 바꿔 반복", s)
+        self.assertIn("덧붙일 내용은 없습니다", s)
+
+    def test_length_rules_present(self):
+        """분량 상한이 글자수로 명시된다(문장 수 지시는 무시됐다)."""
+        self.assertIn("400자 이내", _system("cvr", self.m, self.m.baseline_card()))
+        self.assertIn("600자 이내", _system("fugu", self.m, self.m.baseline_card()))
+
+    def test_token_ceiling_per_persona(self):
+        """프롬프트가 무시될 때의 최후 방어선 — 담당별 출력 상한."""
+        self.assertEqual(_max_tokens_for("cvr"), 512)
+        self.assertEqual(_max_tokens_for("fugu"), 700)
+        self.assertEqual(_max_tokens_for("cora"), CHAT_MAX_TOKENS * 3)  # 체크리스트형 유지
+        self.assertLess(_max_tokens_for("acq"), CHAT_MAX_TOKENS)        # 이전보다 조여졌다
