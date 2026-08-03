@@ -198,7 +198,7 @@
   <aside class="side">
     <div class="logo"><b>GEO</b><span>Marketing Intelligence</span></div>
     <div class="ws" id="wsCard">
-      <div class="name"><span id="wsName">내 가게</span><span class="grade-pill" id="wsGrade" hidden>—</span></div>
+      <div class="name"><span id="wsName">내 가게</span><span class="grade-pill" id="wsGrade" hidden>—</span><span class="grade-pill" id="wsEvidence" hidden title="이 업종은 직접 실증 연구가 아직 없어, 인접 업종 근거를 옮겨와 조언합니다.">간접근거</span></div>
       <div class="sub" id="wsSub">데이터 미등록 · 데모 모드</div>
     </div>
     <nav>
@@ -393,6 +393,14 @@ const PERSONA = {
   cora:{name:'세무', color:'#b45309', hex:'#b45309'},
 };
 const GRADE_COLOR = {A:'#008300', B:'#65A30D', C:'#D97706', D:'#e34948'};
+// 직접 실증 근거가 없는 업종 — 백엔드 chat.INDIRECT_EVIDENCE_INDUSTRIES와 정합
+const INDIRECT_EVIDENCE = ['beauty','service','etc'];
+function showEvidenceBadge(industry){
+  const p = $('#wsEvidence'); if (!p) return;
+  const indirect = INDIRECT_EVIDENCE.includes(industry);
+  p.hidden = !indirect;
+  if (indirect) p.style.background = '#D97706';
+}
 const FIELD_LABELS = {avg_rating:'평점', review_count:'리뷰수', place_clicks:'플레이스클릭',
   aov:'객단가', monthly_customers:'월 고객수', revisit_rate:'재방문율', regular_ratio:'단골비중',
   visit_to_purchase_rate:'전환율', nps:'NPS'};
@@ -474,6 +482,9 @@ f.addEventListener('submit', async (e) => {
   if (!num(fields.aov) && num(fields.monthly_revenue) && num(fields.monthly_customers))
     fields.aov = String(Math.round(num(fields.monthly_revenue)/num(fields.monthly_customers)));
   window._ctx = { merchant, fields };
+  // 직접 실증 근거가 없는 업종이면 '간접근거' 배지를 띄운다(에이전트도 같은 사실을 고지)
+  const industry = fd.get('industry') || 'etc';
+  showEvidenceBadge(industry);
 
   go.disabled = true; go.textContent = '분석 중…';
   try {
@@ -481,7 +492,7 @@ f.addEventListener('submit', async (e) => {
     if (auth) {
       // Django: 업체 생성/수정 → advise
       const payload = {
-        name: merchant, industry: fd.get('industry')||'etc', location: fd.get('location')||'',
+        name: merchant, industry: industry, location: fd.get('location')||'',
         consent_data_processing: true,
         ...(num(fields.monthly_revenue)!=null ? {monthly_revenue: num(fields.monthly_revenue)} : {}),
         ...(num(fields.variable_cost_ratio)!=null ? {variable_cost_ratio: String(fields.variable_cost_ratio)} : {}),
@@ -807,6 +818,7 @@ async function loadWorkspace(){
       const g = m.overall_data_grade;
       if (g) { const p = $('#wsGrade'); p.hidden = false; p.textContent = '데이터 ' + g;
                p.style.background = GRADE_COLOR[g] || '#9AA3B5'; }
+      showEvidenceBadge(m.industry);
       $('#wsSub').textContent = '서버 저장됨 · 모든 기기에서 이어보기';
       $('#emptyBanner').hidden = true;
       renderKpis();

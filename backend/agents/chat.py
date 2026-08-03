@@ -15,6 +15,7 @@ from difflib import SequenceMatcher
 from django.utils import timezone
 
 from .corpus import retrieve
+from .notes import notes_block
 from .llm import CHAT_MAX_TOKENS, Meter, get_provider
 from .personas import PERSONA_META
 
@@ -76,6 +77,11 @@ _CORA_RE = re.compile(
     r"코라|cora|세금|세무|부가세|부가가치세|종소세|종합소득세|절세|세액공제|소득공제|"
     r"세금계산서|현금영수증|기장|장부|간이과세|일반과세|노란우산|가산세|원천세|"
     r"4대\s*보험|홈택스|필요경비|증빙", re.I)
+
+# 직접 실증 근거가 없는 업종 — references.md '남은 편중' 고지와 정합.
+# 뷰티/미용은 peer-review 실증을 아직 확보하지 못해 인접 업종에서 전이 중이다.
+# 판매 대상 업종인데 근거가 전이임을 숨기면 정직 원칙 위반이라 명시적으로 고지한다.
+INDIRECT_EVIDENCE_INDUSTRIES = {"beauty", "service", "etc"}
 
 # 페르소나 정체성 잠금 — 획득·전환이 "특히 유지 에이전트로서"라고 자칭하던 붕괴 방지
 _IDENTITY_LOCK = (
@@ -199,7 +205,7 @@ def _label(persona):
 
 
 def _system(persona, merchant, card, collab=None, summary="", report_note="",
-            actions_note="", benchmark_note=""):
+            actions_note="", benchmark_note="", message=""):
     where = f"{merchant.get_industry_display()}, {merchant.location}"
     if persona == "cora":
         # 세무 가이드 — 개념·일정·절세제도·준비까지만. 세무대리 금지(세무사법 준수)
@@ -248,6 +254,17 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
         base += (f"\n\n[업종 벤치마크 — 익명 집계, 계절성 통제(diff-in-diff)]\n{benchmark_note}\n"
                  "'차분(%p)'이 업종 전체 추세를 뺀 순수 개선 신호다. 성과 평가·조언 조정 시 "
                  "절대 증가율이 아니라 이 차분을 근거로 말하라. 표본(n)이 작으면 참고 수준임을 밝혀라.")
+    # 2단 근거 — 질문과 관련된 항목만 상세 노트를 펼친다(로컬 조회, 추가 API 비용 0)
+    tier2 = notes_block(message, [e.mid for e in retrieve(persona)])
+    if tier2:
+        base += tier2
+    # 직접 근거가 없는 업종이면 전이 사실을 고지한다(판매 시 정직성)
+    if persona != "cora" and merchant.industry in INDIRECT_EVIDENCE_INDUSTRIES:
+        base += (
+            f"\n[업종 근거 고지] 이 가게의 업종({merchant.get_industry_display()})은 "
+            "코퍼스에 직접 실증 근거가 없다. 근거는 외식·소매·서비스 등 인접 업종에서 "
+            "전이한 것이므로, 조언 시 '이 업종 직접 연구는 아직 없고 인접 업종 근거를 "
+            "옮겨온 것'임을 한 번 밝혀라. 이 업종에 대한 연구가 있는 것처럼 말하지 마라.")
     if persona != "cora":
         base += _PROFIT_RULE
         if (card.get("profit") or {}).get("contribution_margin_rate_pct") is None:
@@ -288,7 +305,8 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
         note = report_note if (p == "fugu" or mentions_report) else ""
         system = _system(p, merchant, card, collab,
                          summary=merchant.chat_summary, report_note=note,
-                         actions_note=actions_note, benchmark_note=benchmark_note)
+                         actions_note=actions_note, benchmark_note=benchmark_note,
+                         message=message)
         # 코라는 일정·체크리스트형 답이 길다 — 상한 3배 + 프롬프트 길이규율 + 절단감지 3중 방어
         reply, usage = provider.chat(
             system=system, messages=messages,

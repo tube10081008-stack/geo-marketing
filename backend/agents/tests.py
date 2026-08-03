@@ -1,5 +1,7 @@
 """업종 벤치마크 차분(루프 ⑤) 테스트 — 익명 집계·표본 게이트·중앙값·정직 규칙."""
 from datetime import timedelta
+from pathlib import Path
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -15,8 +17,11 @@ from onboarding.models import (
 )
 
 from .benchmark import MIN_SAMPLE, MIN_SPAN_DAYS, benchmark_note, benchmark_rows
+from .corpus import retrieve
+from .notes import MAX_NOTES, _load_notes, notes_block, relevant_mids
 from .chat import (
-    _is_duplicate, _sanitize_citations, _system, extract_updates, route, run_chat,
+    INDIRECT_EVIDENCE_INDUSTRIES, _is_duplicate, _sanitize_citations, _system,
+    extract_updates, route, run_chat,
 )
 from .views import AdviseView
 from .screening import (
@@ -426,3 +431,75 @@ class PersonaDisciplineTest(TestCase):
         self.assertTrue(r["turns"][1]["deduped"])
         self.assertEqual(r["turns"][1]["reply"], "덧붙일 내용은 없습니다.")
         self.assertEqual(r["turns"][1]["citations"], [])   # 중복이면 인용칩도 안 붙는다
+
+
+class EvidenceNotesTest(TestCase):
+    """2단 근거 — references.md 상세 노트를 질문 관련 항목만 펼친다."""
+
+    def test_all_corpus_entries_parsed(self):
+        """references.md의 [M1]~[M22]가 전부 파싱된다(드리프트 감지)."""
+        notes = _load_notes()
+        self.assertEqual(len(notes), 22)
+        for n in (1, 8, 17, 22):
+            self.assertTrue(notes.get(f"M{n}"), f"M{n} 노트 누락")
+
+    def test_relevant_selection_is_topical(self):
+        """RFM 질문엔 M8(RFM→CLV)이 선택된다 — 아무거나 펼치지 않는다."""
+        ret_mids = [e.mid for e in retrieve("ret")]
+        picked = relevant_mids("RFM으로 단골 세분화하고 CLV 추정하고 싶어요", ret_mids)
+        self.assertIn("M8", picked)
+        self.assertLessEqual(len(picked), MAX_NOTES)
+
+    def test_no_match_yields_nothing(self):
+        """관련 근거가 없으면 억지로 펼치지 않는다."""
+        self.assertEqual(relevant_mids("오늘 날씨 어때요", [e.mid for e in retrieve("ret")]), [])
+        self.assertEqual(notes_block("오늘 날씨 어때요", ["M8"]), "")
+
+    def test_selection_confined_to_persona_corpus(self):
+        """담당 코퍼스 밖 번호는 후보에 오르지 않는다(오배정 원천 차단)."""
+        acq_mids = [e.mid for e in retrieve("acq")]
+        self.assertNotIn("M8", relevant_mids("RFM 세분화 알려줘", acq_mids))
+
+    def test_note_injected_into_prompt(self):
+        """상세 노트가 실제 시스템 프롬프트에 들어간다 — 서지 디테일 포함."""
+        u = User.objects.create_user("notes1", password="pass1234!")
+        m = Merchant.objects.create(owner=u, name="노트카페", industry="cafe", location="서울")
+        s = _system("ret", m, m.baseline_card(), message="RFM 세분화와 CLV 알려줘")
+        self.assertIn("근거 상세", s)
+        self.assertIn("BG/NBD", s)          # 한 줄 색인엔 없던 실제 디테일
+        self.assertIn("지어내지 마라", s)
+        # 관련 없는 질문이면 2단이 붙지 않는다(토큰 절약)
+        self.assertNotIn("근거 상세", _system("ret", m, m.baseline_card(), message="안녕하세요"))
+
+    def test_missing_file_degrades_quietly(self):
+        """references.md를 못 찾아도 죽지 않고 빈 노트로 동작(배포 안전)."""
+        _load_notes.cache_clear()
+        with patch("agents.notes._SEARCH_PATHS", (Path("/nonexistent/references.md"),)):
+            self.assertEqual(_load_notes(), {})
+            self.assertEqual(notes_block("RFM 알려줘", ["M8"]), "")
+        _load_notes.cache_clear()
+
+
+class IndustryDisclosureTest(TestCase):
+    """직접 실증 근거가 없는 업종은 '전이된 간접 근거'임을 고지한다(판매 정직성)."""
+
+    def _sys(self, industry, persona="acq"):
+        u = User.objects.create_user(f"ind{industry}", password="pass1234!")
+        m = Merchant.objects.create(owner=u, name="가게", industry=industry, location="서울")
+        return _system(persona, m, m.baseline_card())
+
+    def test_beauty_gets_disclosure(self):
+        """뷰티는 references.md가 실증 미확보를 자인한 업종 — 반드시 고지."""
+        s = self._sys("beauty")
+        self.assertIn("업종 근거 고지", s)
+        self.assertIn("직접 실증 근거가 없다", s)
+        self.assertIn("있는 것처럼 말하지 마라", s)
+
+    def test_food_and_cafe_no_disclosure(self):
+        """외식·카페·소매는 직접 근거가 있으므로 고지하지 않는다."""
+        for ind in ("food", "cafe", "retail"):
+            self.assertNotIn("업종 근거 고지", self._sys(ind))
+
+    def test_disclosure_covers_all_indirect_industries(self):
+        for ind in INDIRECT_EVIDENCE_INDUSTRIES:
+            self.assertIn("업종 근거 고지", self._sys(ind))
