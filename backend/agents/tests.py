@@ -11,6 +11,10 @@ from onboarding.models import KpiSnapshot, Merchant
 
 from .benchmark import MIN_SAMPLE, MIN_SPAN_DAYS, benchmark_note, benchmark_rows
 from .chat import _sanitize_citations, route
+from .screening import (
+    ClaimScores, classify_roles, deployment_status, evidence_strength,
+    final_weight, primary_role, product_utility,
+)
 from .llm import Meter, get_provider
 
 User = get_user_model()
@@ -183,3 +187,77 @@ class BenchmarkTest(TestCase):
         c.credentials(HTTP_AUTHORIZATION=f"Token {t2.key}")
         r = c.get(f"/api/v1/agents/benchmark/?merchant_id={self.me.pk}")
         self.assertEqual(r.status_code, 404)
+
+
+class ScreeningTest(TestCase):
+    """문헌 스크리너 — 곱셈적 게이트·검증 상한·반증 보존을 코드가 집행하는지."""
+
+    def _s(self, **kw):
+        base = dict(relevance=0.8, internal_validity=0.8, transferability=0.8,
+                    actionability=0.8, measurability=0.8, profit_proximity=0.8,
+                    verification_confidence=1.0,
+                    verification_status="full_text_verified")
+        base.update(kw)
+        return ClaimScores(**base)
+
+    def test_multiplicative_gate_one_zero_axis_collapses(self):
+        """한 축이 0이면 U가 무너진다 — 나머지가 아무리 높아도."""
+        s = self._s(profit_proximity=0.0)
+        self.assertEqual(product_utility(s), 0.0)
+        self.assertEqual(final_weight(s), 0.0)
+
+    def test_verification_cap_dominates_selfreported_v(self):
+        """초록만 봤으면 V=1.0을 주장해도 0.6으로 눌린다."""
+        s = self._s(verification_status="abstract_only", verification_confidence=1.0)
+        self.assertEqual(s.effective_v, 0.6)
+        # metadata_only는 0.3 → pending_verification 구간
+        s2 = self._s(verification_status="metadata_only", verification_confidence=0.9)
+        self.assertEqual(s2.effective_v, 0.3)
+        self.assertIn("pending_verification", classify_roles(s2))
+
+    def test_experiment_candidate_requires_full_verification(self):
+        """실험 후보는 V>=0.7 — 초록만으로는 절대 도달 불가."""
+        strong = self._s()
+        self.assertIn("experiment_candidate", classify_roles(strong))
+        abstract = self._s(verification_status="abstract_only")
+        self.assertNotIn("experiment_candidate", classify_roles(abstract))
+
+    def test_counter_evidence_preserved_despite_low_f(self):
+        """반증은 F가 낮아도 보존된다(S는 F에 미포함)."""
+        s = self._s(actionability=0.1, profit_proximity=0.1, measurability=0.2,
+                    safety_counterevidence_value=0.9)
+        self.assertLess(final_weight(s), 0.35)
+        roles = classify_roles(s)
+        self.assertIn("counter_evidence_brake", roles)
+        self.assertEqual(primary_role(roles), "counter_evidence_brake")
+
+    def test_critical_risk_blocks_regardless_of_score(self):
+        """중대 위험이면 만점이어도 blocked."""
+        s = self._s(critical_risk=True)
+        self.assertEqual(deployment_status(s, classify_roles(s)), "blocked")
+
+    def test_retraction_rejected(self):
+        s = self._s(retraction_or_concern=True)
+        self.assertEqual(classify_roles(s), ["rejected"])
+        self.assertEqual(deployment_status(s, classify_roles(s)), "blocked")
+
+    def test_hypothesis_generator_maps_to_local_test_only(self):
+        """직접 권고가 아니라 로컬 검증 가설 — 배치는 local_test_only."""
+        s = self._s(internal_validity=0.5, transferability=0.5, profit_proximity=0.5,
+                    verification_status="abstract_only", verification_confidence=0.6)
+        roles = classify_roles(s)
+        self.assertEqual(primary_role(roles), "hypothesis_generator")
+        self.assertEqual(deployment_status(s, roles), "local_test_only")
+
+    def test_score_out_of_range_rejected(self):
+        with self.assertRaises(ValueError):
+            ClaimScores(relevance=1.5)
+
+    def test_formula_matches_spec(self):
+        """U=(R·T·A·M·P)^(1/5), E=sqrt(I·V), F=U·E 수식 일치."""
+        s = self._s(relevance=0.5, transferability=0.5, actionability=0.5,
+                    measurability=0.5, profit_proximity=0.5, internal_validity=0.64,
+                    verification_confidence=1.0)
+        self.assertEqual(product_utility(s), 0.5)
+        self.assertEqual(evidence_strength(s), 0.8)
+        self.assertEqual(final_weight(s), 0.4)
