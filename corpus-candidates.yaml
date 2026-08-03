@@ -17,9 +17,15 @@ candidates:
   verification:
     status: abstract_only
     sources: ["Cambridge Core (JDM)", "sjdm.org 원문 페이지", "Semantic Scholar"]
-    full_text_available: true        # 공개 PDF 존재 → 전문 검증으로 승격 가능
+    full_text_available: true        # 공개 PDF 존재(JDM 오픈액세스) → 전문 검증 시 승격 가능
     retraction_or_concern: false
-    notes: "서지·핵심주장 일치. 표본수·신뢰구간·무작위화 절차 미확인."
+    notes: |
+      서지·핵심주장 일치. 표본수·신뢰구간·무작위화 절차 미확인.
+      2026-08 전문 검증 시도 → 실행 환경의 아웃바운드 네트워크 정책이 sjdm.org·
+      cambridge.org 등을 차단(CONNECT 403)해 원문 취득 실패. 검색엔진 요약만으로는
+      방법·효과크기를 확정할 수 없어 V=0.6(abstract_only) 유지.
+      → 승격 경로: 네트워크 정책 허용 후 재시도, 또는 사장님이 PDF를 직접 첨부.
+         전문 확인 시 V<=1.0 → experiment_candidate/recommendation_eligible 도달 가능.
   claim_evaluations:
     - claim_id: "C1"
       focal_claim: "메뉴 목록의 처음·끝 위치에 놓인 항목이 중앙 위치일 때보다 더 자주 선택되었다"
