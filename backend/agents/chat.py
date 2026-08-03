@@ -18,7 +18,10 @@ from .personas import PERSONA_META
 KEYWORDS = {
     "acq": ["신규", "노출", "리뷰", "유입", "광고", "검색", "플레이스", "손님", "홍보", "인스타", "sns"],
     "cvr": ["전환", "객단가", "가격", "메뉴", "오퍼", "할인", "구매", "프로모션", "세트"],
-    "ret": ["재방문", "단골", "멤버십", "쿠폰", "이탈", "nps", "리텐션", "적립"],
+    # 멤버십·RFM·CLV·로열티는 유지(ret)의 핵심 주제 — 담당 코퍼스(M8·M17·M19)가 여기 있다.
+    # '멤버쉽/맴버쉽'은 사용자가 흔히 쓰는 비표준 철자라 반드시 함께 매칭(과거 유지 미라우팅 버그).
+    "ret": ["재방문", "단골", "멤버십", "멤버쉽", "맴버십", "맴버쉽", "member", "쿠폰", "이탈",
+            "nps", "리텐션", "적립", "rfm", "clv", "ltv", "crm", "생애가치", "로열티", "충성", "세분화"],
 }
 _PATTERNS = {
     "avg_rating": r"평점\s*(?:은|이|:|을)?\s*([0-5](?:\.\d)?)",
@@ -75,6 +78,34 @@ def extract_updates(message):
         if m:
             out[field] = m.group(1).replace(",", "")
     return out
+
+
+# 본문에서 인용 토큰 추출 — [M1]·[T3] 형태. 검증(코퍼스 실재)에 사용.
+_CITE_TOKEN_RE = re.compile(r"\[([MT]\d+)\]")
+
+
+def _sanitize_citations(reply, persona):
+    """답변 본문의 [M#]/[T#] 중 '이 페르소나에게 제공된 코퍼스에 실재하는' 것만 남긴다.
+
+    코퍼스에 없는 번호(환각)나 다른 담당의 번호(오배정)는 본문에서 제거하고 칩에도
+    넣지 않는다 — 지어낸 인용을 코드로 차단해 '검증된 근거만'을 강제(제품 1번 원칙).
+    반환: (정리된 본문, 실제 사용된 인용 리스트 — 등장 순서·중복 제거).
+    """
+    allowed = {e.mid for e in retrieve(persona)}
+    used = []
+
+    def _keep(m):
+        mid = m.group(1)
+        if mid in allowed:
+            if mid not in used:
+                used.append(mid)
+            return m.group(0)
+        return ""  # 미검증 인용 토큰 제거
+
+    cleaned = _CITE_TOKEN_RE.sub(_keep, reply or "")
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)      # 토큰 제거로 생긴 이중 공백
+    cleaned = re.sub(r"\s+([,.)])", r"\1", cleaned)   # 구두점 앞 공백 정리
+    return cleaned.strip(), used
 
 
 def route(message, forced, provider, meter):
@@ -199,8 +230,11 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
             system=system, messages=messages,
             max_tokens=CHAT_MAX_TOKENS * 3 if p == "cora" else CHAT_MAX_TOKENS)
         meter.add(usage)
+        # 검증된 인용만: 본문의 [M#]/[T#] 중 이 담당 코퍼스에 실재하는 것만 남기고
+        # 나머지(환각·오배정)는 본문·칩에서 제거 → 정직 원칙을 코드로 강제.
+        reply, used_cites = _sanitize_citations(reply, p)
         turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,
-                      "citations": [e.mid for e in retrieve(p)]})
+                      "citations": used_cites})
         collab = f"{label}: {reply}"[:600]  # 다음 페르소나 참조용 — 길이 상한(비용 방어)
 
     return {

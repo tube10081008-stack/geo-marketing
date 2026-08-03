@@ -10,8 +10,70 @@ from rest_framework.test import APIClient
 from onboarding.models import KpiSnapshot, Merchant
 
 from .benchmark import MIN_SAMPLE, MIN_SPAN_DAYS, benchmark_note, benchmark_rows
+from .chat import _sanitize_citations, route
+from .llm import Meter, get_provider
 
 User = get_user_model()
+
+
+class RouteTest(TestCase):
+    """라우팅 회귀·근본원인 방어 — 멤버십/RFM류가 유지(ret)로 가야 한다."""
+
+    def _route(self, msg):
+        return route(msg, None, get_provider(), Meter())
+
+    def test_membership_spelling_variant_routes_ret(self):
+        # 실제 버그: '멤버쉽'(비표준 철자)이 키워드 '멤버십'과 달라 유지 미라우팅됐던 케이스
+        picks = self._route(
+            "지금 포스 시스템을 자체 개발해서 고객 멤버쉽을 다룰 예정이야! 어떤 부분을 참고하면 좋을까?")
+        self.assertIn("ret", picks)
+
+    def test_standard_membership_routes_ret(self):
+        self.assertIn("ret", self._route("멤버십 운영 어떻게 하나요"))
+
+    def test_rfm_routes_ret(self):
+        self.assertIn("ret", self._route("RFM 데이터 수집의 기초개념 자세히 설명해줘"))
+
+    def test_clv_loyalty_routes_ret(self):
+        self.assertIn("ret", self._route("고객 생애가치(CLV)와 로열티 프로그램 알려줘"))
+
+    def test_acquisition_still_routes_acq(self):
+        # 회귀 방지: 기존 획득 키워드 라우팅은 그대로
+        self.assertEqual(self._route("신규 손님 노출 늘리려면?"), ["acq"])
+
+
+class CitationSanitizeTest(TestCase):
+    """검증된 인용 강제 — 담당 코퍼스 밖 번호는 본문·칩에서 제거(정직 원칙)."""
+
+    def test_keeps_only_valid_persona_citations(self):
+        # 획득(acq): M15·M1은 acq 코퍼스 → 유지 / M16·M19는 유지(ret) 것 → 제거
+        reply = "리뷰가 중요합니다 [M15]. 추천 고객 가치가 높고 [M1] 관계를 강화합니다 [M16]. 로열티 [M19]."
+        cleaned, used = _sanitize_citations(reply, "acq")
+        self.assertEqual(used, ["M15", "M1"])
+        self.assertIn("[M15]", cleaned)
+        self.assertNotIn("[M16]", cleaned)
+        self.assertNotIn("[M19]", cleaned)
+
+    def test_hallucinated_number_dropped(self):
+        # 코퍼스에 없는 번호(M99)는 담당과 무관하게 제거
+        cleaned, used = _sanitize_citations("테스트 [M99] 문장입니다", "cvr")
+        self.assertEqual(used, [])
+        self.assertNotIn("M99", cleaned)
+
+    def test_dedupe_preserves_order(self):
+        cleaned, used = _sanitize_citations("[M12] 그리고 [M14], 다시 [M12]", "cvr")
+        self.assertEqual(used, ["M12", "M14"])
+
+    def test_cora_tax_citations(self):
+        # 코라(cora)는 [T#]만 유효, 섞여 든 [M1]은 제거
+        cleaned, used = _sanitize_citations("부가세 신고 [T1], 그리고 [M1]은 무관", "cora")
+        self.assertEqual(used, ["T1"])
+        self.assertNotIn("[M1]", cleaned)
+
+    def test_no_citation_noop(self):
+        cleaned, used = _sanitize_citations("근거 없는 일반 답변입니다.", "acq")
+        self.assertEqual(used, [])
+        self.assertEqual(cleaned, "근거 없는 일반 답변입니다.")
 
 
 def _snap(merchant, metric, value, days_ago):
