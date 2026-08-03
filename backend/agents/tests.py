@@ -503,3 +503,50 @@ class IndustryDisclosureTest(TestCase):
     def test_disclosure_covers_all_indirect_industries(self):
         for ind in INDIRECT_EVIDENCE_INDUSTRIES:
             self.assertIn("업종 근거 고지", self._sys(ind))
+
+
+class RoutingCoverageTest(TestCase):
+    """20문 고객 감사에서 드러난 라우팅 공백 — 근거를 쥔 담당이 깨어나는가."""
+
+    def _r(self, msg):
+        return route(msg, None, get_provider(), Meter())
+
+    def test_delivery_routes_to_acq(self):
+        """배달 근거 M20·M21은 획득 소유 — 배달 질문에 획득이 깨어나야 한다."""
+        for q in ("배달앱에 입점하는 게 나을까요?", "배민 수수료가 부담돼요",
+                  "포장 주문을 늘리고 싶어요"):
+            self.assertIn("acq", self._r(q), q)
+
+    def test_negative_review_reaches_ret(self):
+        """부정리뷰 대응 근거 M13은 유지 소유 — 유지가 깨어나야 인용 가능."""
+        for q in ("부정 리뷰가 하나 달렸는데 어떻게 대응하죠?", "악평이 달렸어요"):
+            self.assertIn("ret", self._r(q), q)
+
+    def test_diagnosis_goes_to_fugu(self):
+        """원인 미상의 종합 진단은 복어가 받는다(한 담당으로 좁히면 오진)."""
+        for q in ("지난달보다 매출이 떨어졌어요", "요즘 손님이 줄었어요",
+                  "장사가 안 돼요", "뭐부터 해야 할까요?"):
+            self.assertEqual(self._r(q), ["fugu"], q)
+
+    def test_out_of_scope_goes_to_fugu(self):
+        """채용·노무·임대차는 팀 범위 밖 — 복어가 경계를 밝힌다."""
+        for q in ("직원을 한 명 더 뽑아야 할지 고민이에요", "알바 채용 어떻게 하죠",
+                  "월세 인상 통보를 받았어요"):
+            self.assertEqual(self._r(q), ["fugu"], q)
+
+    def test_tax_still_wins_over_out_of_scope(self):
+        """4대보험·세금은 코라가 먼저 잡는다(범위밖 규칙에 뺏기지 않게)."""
+        self.assertEqual(self._r("직원 4대 보험은 어떻게 처리하나요"), ["cora"])
+
+    def test_existing_routes_unbroken(self):
+        """회귀 방지 — 기존 라우팅은 그대로."""
+        self.assertIn("acq", self._r("신규 손님 노출 늘리려면?"))
+        self.assertIn("ret", self._r("고객 멤버쉽 만들 예정이야 뭘 참고할까"))
+        self.assertEqual(self._r("부가세 신고 언제까지예요?"), ["cora"])
+        self.assertEqual(self._r("복어야 정리해줘"), ["fugu"])
+
+    def test_tier2_notes_for_conversion_basics(self):
+        """객단가·세트 질문에도 상세근거가 붙는다(이전엔 미발동)."""
+        cvr_mids = [e.mid for e in retrieve("cvr")]
+        self.assertTrue(relevant_mids("객단가를 올리고 싶어요", cvr_mids))
+        self.assertTrue(relevant_mids("세트 메뉴를 만들면 도움이 될까요?", cvr_mids))
