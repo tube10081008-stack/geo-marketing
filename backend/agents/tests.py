@@ -7,10 +7,16 @@ from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from onboarding.models import KpiSnapshot, Merchant
+from decimal import Decimal
+
+from onboarding.models import (
+    METRIC_CHOICES, ConversionBaseline, KpiSnapshot, Merchant,
+    record_margin_snapshots,
+)
 
 from .benchmark import MIN_SAMPLE, MIN_SPAN_DAYS, benchmark_note, benchmark_rows
-from .chat import _sanitize_citations, route
+from .chat import _sanitize_citations, extract_updates, route
+from .views import AdviseView
 from .screening import (
     ClaimScores, classify_roles, deployment_status, evidence_strength,
     final_weight, primary_role, product_utility,
@@ -261,3 +267,93 @@ class ScreeningTest(TestCase):
         self.assertEqual(product_utility(s), 0.5)
         self.assertEqual(evidence_strength(s), 0.8)
         self.assertEqual(final_weight(s), 0.4)
+
+
+class ContributionMarginTest(TestCase):
+    """증분 공헌이익 — 목적함수 교정. 매출만 보면 할인이 이익을 깎아도 '성공'이 된다."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("cmowner", password="pass1234!")
+        self.m = Merchant.objects.create(
+            owner=self.user, name="마진카페", industry="cafe", location="서울",
+            monthly_revenue=10_000_000)
+        ConversionBaseline.objects.create(merchant=self.m, aov=10_000)
+
+    def test_no_cost_ratio_means_no_fabricated_margin(self):
+        """변동비율을 모르면 이익을 지어내지 않는다 — None이어야 한다."""
+        self.assertIsNone(self.m.contribution_margin_rate())
+        self.assertIsNone(self.m.monthly_contribution_margin())
+        self.assertIsNone(self.m.unit_contribution_margin())
+        self.assertEqual(record_margin_snapshots(self.m), [])
+        card = self.m.baseline_card()
+        self.assertIsNone(card["profit"]["contribution_margin_rate_pct"])
+        self.assertIn("계산할 수 없다", card["profit"]["note"])
+
+    def test_derived_margin_math(self):
+        """변동비율 35% → 공헌이익률 65%, 월 650만, 주문당 6,500원."""
+        self.m.variable_cost_ratio = Decimal("35.0")
+        self.m.save()
+        self.assertEqual(self.m.contribution_margin_rate(), Decimal("65.0"))
+        self.assertEqual(self.m.monthly_contribution_margin(), 6_500_000)
+        self.assertEqual(self.m.unit_contribution_margin(), 6_500)
+
+    def test_revenue_up_but_margin_down_is_caught(self):
+        """핵심 시나리오: 할인으로 매출은 +10%인데 공헌이익은 감소.
+
+        매출만 재던 기존 구조에서는 '성공'으로 보이던 액션이다.
+        """
+        self.m.variable_cost_ratio = Decimal("35.0")
+        self.m.save()
+        record_margin_snapshots(self.m)              # 기준선: CM 650만
+        before = self.m.monthly_contribution_margin()
+
+        # 할인 시행 → 매출 +10%, 그러나 변동비율 35% → 50%로 악화
+        self.m.monthly_revenue = 11_000_000
+        self.m.variable_cost_ratio = Decimal("50.0")
+        self.m.save()
+        record_margin_snapshots(self.m)
+        after = self.m.monthly_contribution_margin()
+
+        self.assertGreater(self.m.monthly_revenue, 10_000_000)  # 매출은 늘었다
+        self.assertLess(after, before)                          # 이익은 줄었다
+        self.assertEqual(after, 5_500_000)
+        # 시계열에도 하락이 남아 액션 델타가 이익 기준으로 판정된다
+        snaps = list(self.m.snapshots.filter(metric="contribution_margin")
+                     .values_list("value", flat=True))
+        self.assertEqual([int(v) for v in snaps], [6_500_000, 5_500_000])
+
+    def test_action_target_promotes_to_margin(self):
+        """변동비율을 알면 전환 액션 타깃이 객단가 → 주문당 공헌이익으로 승격."""
+        v = AdviseView()
+        self.assertEqual(v._target_metric("cvr", self.m), "aov")
+        self.m.variable_cost_ratio = Decimal("35.0")
+        self.m.save()
+        self.assertEqual(v._target_metric("cvr", self.m), "unit_contribution_margin")
+        # 획득·유지 타깃은 그대로
+        self.assertEqual(v._target_metric("acq", self.m), "review_count")
+
+    def test_cost_ratio_extracted_from_chat(self):
+        """대화에서 원가율 발화를 잡아낸다."""
+        self.assertEqual(extract_updates("우리 원가율은 38% 정도예요"),
+                         {"variable_cost_ratio": "38"})
+        self.assertEqual(extract_updates("변동비 비율 42.5% 입니다"),
+                         {"variable_cost_ratio": "42.5"})
+
+    def test_checkin_records_cost_ratio_and_derives_margin(self):
+        """주간 체크인으로 원가율이 들어오면 공헌이익 시계열이 살아난다."""
+        c = APIClient()
+        token, _ = Token.objects.get_or_create(user=self.user)
+        c.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        r = c.post("/api/v1/agents/checkin/", {
+            "merchant_id": self.m.pk, "monthly_revenue": 12_000_000,
+            "variable_cost_ratio": "40.0"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.m.refresh_from_db()
+        self.assertEqual(self.m.variable_cost_ratio, Decimal("40.0"))
+        self.assertEqual(self.m.monthly_contribution_margin(), 7_200_000)
+        self.assertTrue(self.m.snapshots.filter(metric="contribution_margin").exists())
+
+    def test_margin_metrics_benchmarkable(self):
+        """공헌이익도 업종 벤치마크 대상 지표에 포함된다(차분 비교 가능)."""
+        self.assertIn("contribution_margin", dict(METRIC_CHOICES))
+        self.assertIn("unit_contribution_margin", dict(METRIC_CHOICES))

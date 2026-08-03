@@ -239,6 +239,7 @@
         <input id="ckRating" placeholder="평점 (예: 4.8)" inputmode="decimal" />
         <input id="ckReviews" placeholder="리뷰수 (예: 78)" inputmode="numeric" />
         <input id="ckRevenue" placeholder="월매출 원 (선택)" inputmode="numeric" />
+        <input id="ckCostRatio" placeholder="변동비율 % (선택)" inputmode="decimal" />
         <button class="btn tiny" id="ckSave">기록</button>
         <button class="btn tiny ghost" id="ckSkip">다음에</button>
       </div>
@@ -309,6 +310,7 @@
         </div>
         <div class="row2">
           <div class="field"><label>월 매출(원)</label><input name="monthly_revenue" inputmode="numeric" placeholder="30000000" /></div>
+          <div class="field"><label>변동비율(%) <span class="hint">재료비+수수료</span></label><input name="variable_cost_ratio" inputmode="decimal" placeholder="35" /></div>
           <div class="field"><label>90일 목표 성장률(%)</label><input name="growth_goal" inputmode="decimal" placeholder="15" /></div>
         </div>
       </div>
@@ -467,7 +469,7 @@ f.addEventListener('submit', async (e) => {
   const question = fd.get('question') || '';
   const fields = {};
   ['place_clicks','review_count','avg_rating','monthly_revenue','monthly_customers',
-   'aov','revisit_rate','regular_ratio'].forEach(k => fields[k] = fd.get(k));
+   'aov','revisit_rate','regular_ratio','variable_cost_ratio'].forEach(k => fields[k] = fd.get(k));
   // 객단가 미입력 시 매출÷고객수 자동계산(양 모드 공통)
   if (!num(fields.aov) && num(fields.monthly_revenue) && num(fields.monthly_customers))
     fields.aov = String(Math.round(num(fields.monthly_revenue)/num(fields.monthly_customers)));
@@ -482,6 +484,7 @@ f.addEventListener('submit', async (e) => {
         name: merchant, industry: fd.get('industry')||'etc', location: fd.get('location')||'',
         consent_data_processing: true,
         ...(num(fields.monthly_revenue)!=null ? {monthly_revenue: num(fields.monthly_revenue)} : {}),
+        ...(num(fields.variable_cost_ratio)!=null ? {variable_cost_ratio: String(fields.variable_cost_ratio)} : {}),
         acquisition: { data_grade: gradeOf(fields.avg_rating, fields.review_count, fields.place_clicks),
           ...(num(fields.place_clicks)!=null ? {place_clicks:num(fields.place_clicks)} : {}),
           ...(num(fields.review_count)!=null ? {review_count:num(fields.review_count)} : {}),
@@ -638,7 +641,7 @@ $('#actGrid').addEventListener('click', async e => {
 });
 
 function renderKpis() {
-  const x = (window._ctx && window._ctx.fields) || {};
+  let x = (window._ctx && window._ctx.fields) || {};
   const has = Object.values(x).some(v => v !== '' && v != null);
   if (!has) { $('#kpis').hidden = true; return; }
   const tiles = [
@@ -646,8 +649,14 @@ function renderKpis() {
     ['monthly_customers','월 고객수','명','cvr'], ['aov','객단가','원','cvr'],
     ['revisit_rate','재방문율','%','ret'], ['regular_ratio','단골비중','%','ret'],
   ];
+  // 목적함수는 매출이 아니라 공헌이익 — 원가율을 알면 주문당 공헌이익을 함께 보여준다
+  const vcr = num(x.variable_cost_ratio), aov = num(x.aov);
+  if (vcr != null && aov != null) {
+    x = Object.assign({}, x, {unit_cm: String(Math.round(aov * (100 - vcr) / 100))});
+    tiles.push(['unit_cm','주문당 공헌이익','원','cvr']);
+  }
   $('#kpis').innerHTML = tiles.map(([k,label,unit,p]) => {
-    const v = x[k]; const disp = (k==='aov'||k==='monthly_customers') ? fmt(v) : (v==null||v===''?'—':v);
+    const v = x[k]; const disp = (k==='aov'||k==='monthly_customers'||k==='unit_cm') ? fmt(v) : (v==null||v===''?'—':v);
     return `<div class="kpi">
       <div class="lab"><i style="background:${PERSONA[p].color}"></i>${label}</div>
       <div class="val">${disp}<small>${unit}</small></div></div>`;
@@ -791,6 +800,7 @@ async function loadWorkspace(){
       window._ctx = { merchant: m.name, fields: {
         avg_rating: a.avg_rating ?? '', review_count: a.review_count ?? '',
         place_clicks: a.place_clicks ?? '', monthly_revenue: m.monthly_revenue ?? '',
+        variable_cost_ratio: m.variable_cost_ratio ?? '',
         monthly_customers: cv.monthly_customers ?? '', aov: cv.aov ?? '',
         revisit_rate: rt.revisit_rate ?? '', regular_ratio: rt.regular_ratio ?? '' } };
       $('#pageTitle').textContent = m.name; $('#wsName').textContent = m.name;
@@ -895,7 +905,8 @@ $('#ckSave').addEventListener('click', async () => {
   const body = { merchant_id: mid };
   const vals = { avg_rating: $('#ckRating').value.trim(),
                  review_count: $('#ckReviews').value.trim(),
-                 monthly_revenue: $('#ckRevenue').value.replace(/,/g,'').trim() };
+                 monthly_revenue: $('#ckRevenue').value.replace(/,/g,'').trim(),
+                 variable_cost_ratio: $('#ckCostRatio').value.trim() };
   Object.entries(vals).forEach(([k,v]) => { if (v) body[k] = v; });
   if (Object.keys(body).length === 1) { toast('숫자를 하나 이상 입력해주세요'); return; }
   try {
@@ -903,6 +914,7 @@ $('#ckSave').addEventListener('click', async () => {
     $('#checkinBar').hidden = true;
     if (d.recorded.avg_rating) window._ctx.fields.avg_rating = d.recorded.avg_rating;
     if (d.recorded.review_count) window._ctx.fields.review_count = d.recorded.review_count;
+    if (d.recorded.variable_cost_ratio) window._ctx.fields.variable_cost_ratio = d.recorded.variable_cost_ratio;
     renderKpis();
     refreshBenchmark();  // 새 측정으로 추세가 바뀌었을 수 있다
     sysBubble('주간 체크인 기록 완료 — 추세에 반영됐어요. 진행 중 액션의 실측에도 사용됩니다.');

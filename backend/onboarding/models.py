@@ -12,6 +12,8 @@
 - RetentionBaseline     : 🔁 유지 KPI 베이스라인 (intake §2.3) — 재방문·LTV·이탈
 - CustomerTransaction   : RFM/CLV 원천 거래로그 [M8] — ※가명·민감정보 (intake §4)
 """
+from decimal import Decimal
+
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -76,6 +78,13 @@ class Merchant(models.Model):
         "90일 목표 성장률(%)", max_digits=5, decimal_places=1, null=True, blank=True,
         help_text="예: 15.0 → 3개월 +15%",
     )
+    variable_cost_ratio = models.DecimalField(
+        "변동비율(%)", max_digits=4, decimal_places=1, null=True, blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="매출에 비례하는 비용 비율(재료비+카드/배달 수수료 등). "
+                  "이 값이 있어야 '증분 공헌이익'을 잰다 — 없으면 매출만 재게 되어 "
+                  "할인 조언이 마진을 깎아도 '성공'으로 보인다.",
+    )
     consent_data_processing = models.BooleanField(
         "고객데이터 위탁처리 동의", default=False,
         help_text="intake §4 개인정보 게이트. 미동의 시 거래로그 수집 불가.",
@@ -113,6 +122,31 @@ class Merchant(models.Model):
         order = ["A", "B", "C", "D"]
         return max(grades, key=order.index)
 
+    # ── 공헌이익(증분 이익) 파생 ──────────────────────────────────────────
+    # 변동비율 하나만 받아 나머지를 유도한다. 값이 없으면 None — 절대 추정하지 않는다
+    # (모르는 원가를 지어내면 '이익이 늘었다'는 거짓 판정이 나온다).
+
+    def contribution_margin_rate(self):
+        """공헌이익률(%) = 100 - 변동비율. 변동비율 미입력 시 None."""
+        if self.variable_cost_ratio is None:
+            return None
+        return Decimal("100") - self.variable_cost_ratio
+
+    def monthly_contribution_margin(self):
+        """월 공헌이익(원) = 월매출 × 공헌이익률."""
+        rate = self.contribution_margin_rate()
+        if rate is None or self.monthly_revenue is None:
+            return None
+        return int(Decimal(self.monthly_revenue) * rate / Decimal("100"))
+
+    def unit_contribution_margin(self):
+        """주문당 공헌이익(원) = 객단가 × 공헌이익률."""
+        rate = self.contribution_margin_rate()
+        cvr = getattr(self, "conversion", None)
+        if rate is None or cvr is None or cvr.aov is None:
+            return None
+        return int(Decimal(cvr.aov) * rate / Decimal("100"))
+
     def baseline_card(self) -> dict:
         """첫 만남 산출물: 퍼널 KPI 스냅샷 + 데이터등급 (intake §3, orchestrator §4.2).
 
@@ -131,6 +165,21 @@ class Merchant(models.Model):
             "retention": None,
             "rough_projection": None,
             "disclaimer": "투영치는 베이스라인 기반 추정이며 인과 보장이 아님(orchestrator §4.3).",
+            # 증분 공헌이익이 최종 목적함수 — 매출만 보면 할인이 마진을 깎아도 '성공'이 된다
+            "profit": {
+                "variable_cost_ratio_pct": (
+                    float(self.variable_cost_ratio)
+                    if self.variable_cost_ratio is not None else None),
+                "contribution_margin_rate_pct": (
+                    float(self.contribution_margin_rate())
+                    if self.contribution_margin_rate() is not None else None),
+                "monthly_contribution_margin_krw": self.monthly_contribution_margin(),
+                "unit_contribution_margin_krw": self.unit_contribution_margin(),
+                "note": ("변동비율 미입력 — 공헌이익을 계산할 수 없다. 매출 증가를 "
+                         "이익 증가로 말하지 마라."
+                         if self.variable_cost_ratio is None else
+                         "성과 판단은 매출이 아니라 공헌이익 기준으로 하라."),
+            },
         }
 
         if acq:
@@ -396,12 +445,19 @@ class DeepReport(models.Model):
 
 
 # 스냅샷·액션 공용 지표 키 (agents.views._UPDATE_MAP과 정합)
+# 공헌이익 3종은 변동비율에서 파생(record_margin_snapshots) — 매출만 재던 목적함수 교정.
 METRIC_CHOICES = [
     ("avg_rating", "평점"), ("review_count", "리뷰수"), ("place_clicks", "플레이스클릭"),
     ("aov", "객단가"), ("monthly_customers", "월 고객수"),
     ("visit_to_purchase_rate", "전환율"), ("revisit_rate", "재방문율"),
     ("regular_ratio", "단골비중"), ("nps", "NPS"), ("monthly_revenue", "월 매출"),
+    ("contribution_margin", "월 공헌이익"),
+    ("unit_contribution_margin", "주문당 공헌이익"),
+    ("variable_cost_ratio", "변동비율"),
 ]
+
+# 공헌이익 계열 — 액션 성과 판정에서 매출보다 우선하는 지표(SCREENING.md P축)
+MARGIN_METRICS = ("contribution_margin", "unit_contribution_margin")
 
 
 class KpiSnapshot(models.Model):
@@ -440,6 +496,27 @@ def record_snapshot(merchant, metric, value, source="chat"):
         return last
     return KpiSnapshot.objects.create(
         merchant=merchant, metric=metric, value=dv, source=source)
+
+
+def record_margin_snapshots(merchant, source="chat"):
+    """매출·객단가가 갱신될 때 공헌이익 스냅샷을 파생 축적.
+
+    변동비율이 없으면 아무것도 기록하지 않는다 — 모르는 원가를 가정해 이익을
+    지어내면 '매출은 늘고 이익은 줄어든' 액션이 성공으로 판정된다.
+    반환: 기록된 지표명 리스트.
+    """
+    if merchant.variable_cost_ratio is None:
+        return []
+    recorded = []
+    for metric, value in (
+            ("contribution_margin", merchant.monthly_contribution_margin()),
+            ("unit_contribution_margin", merchant.unit_contribution_margin()),
+            ("variable_cost_ratio", merchant.variable_cost_ratio)):
+        if value is None:
+            continue
+        if record_snapshot(merchant, metric, value, source=source) is not None:
+            recorded.append(metric)
+    return recorded
 
 
 class Action(models.Model):

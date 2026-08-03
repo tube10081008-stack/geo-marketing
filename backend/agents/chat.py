@@ -32,14 +32,33 @@ _PATTERNS = {
     "nps": r"(?i)nps\s*(?:은|는|이|:)?\s*(-?\d{1,3})",
     "regular_ratio": r"단골\s*(?:비중|비율)?\s*(?:은|이|:)?\s*(\d{1,3})\s*%?",
     "monthly_customers": r"(?:월\s*)?고객\s*(?:수)?\s*(?:는|은|가|:)?\s*([\d,]{2,7})\s*명",
+    # 공헌이익의 유일한 입력 — 사장님이 대화 중 말하면 잡는다
+    "variable_cost_ratio": r"(?:변동비|원가)\s*(?:율|비율)?\s*(?:은|는|이|:)?\s*(\d{1,2}(?:\.\d)?)\s*%",
 }
 
 
 def _card_summary(card):
     a, c, r = card.get("acquisition") or {}, card.get("conversion") or {}, card.get("retention") or {}
-    return (f"평점 {a.get('avg_rating')}, 리뷰 {a.get('review_count')}, "
+    p = card.get("profit") or {}
+    base = (f"평점 {a.get('avg_rating')}, 리뷰 {a.get('review_count')}, "
             f"객단가 {c.get('aov_krw')}, 월고객수 {c.get('monthly_customers')}, "
             f"재방문 {r.get('revisit_rate_pct')}%, 단골비중 {r.get('regular_ratio_pct')}%")
+    if p.get("contribution_margin_rate_pct") is not None:
+        base += (f", 공헌이익률 {p['contribution_margin_rate_pct']}%"
+                 f", 주문당 공헌이익 {p.get('unit_contribution_margin_krw')}원")
+    return base
+
+
+# 목적함수 규율 — 매출↑을 이익↑으로 말하지 못하게 막는다(SCREENING.md P축)
+_PROFIT_RULE = (
+    "\n[목적함수] 최종 목표는 매출이 아니라 **증분 공헌이익**이다. "
+    "할인·증정·수수료가 붙는 제안은 매출을 늘리면서 이익을 줄일 수 있으니, "
+    "그 경우 원가 부담과 손익분기 판매량을 함께 짚어라. "
+    "매출 증가를 이익 증가라고 단정하지 마라.")
+_NO_MARGIN_RULE = (
+    "\n[공헌이익 미상] 이 가게는 변동비율(원가율)을 아직 알려주지 않았다. "
+    "따라서 이익 효과를 계산할 수 없다 — 이익이 늘어난다고 단정하지 말고, "
+    "필요하면 '원가율이 몇 %인지' 한 번 물어보라(그 숫자를 말하면 자동 기록된다).")
 
 
 # 목표/희망 발화("평점을 4.5로 올리고 싶어요")를 사실로 오인하지 않기 위한 의도어 가드(REVIEW §2)
@@ -192,6 +211,10 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
         base += (f"\n\n[업종 벤치마크 — 익명 집계, 계절성 통제(diff-in-diff)]\n{benchmark_note}\n"
                  "'차분(%p)'이 업종 전체 추세를 뺀 순수 개선 신호다. 성과 평가·조언 조정 시 "
                  "절대 증가율이 아니라 이 차분을 근거로 말하라. 표본(n)이 작으면 참고 수준임을 밝혀라.")
+    if persona != "cora":
+        base += _PROFIT_RULE
+        if (card.get("profit") or {}).get("contribution_margin_rate_pct") is None:
+            base += _NO_MARGIN_RULE
     base += _HONESTY
     if summary:
         base += f"\n\n[장기기억 — 이전 대화 요약]\n{summary[:SUMMARY_MAX_CHARS]}"
