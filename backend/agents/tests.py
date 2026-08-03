@@ -15,13 +15,15 @@ from onboarding.models import (
 )
 
 from .benchmark import MIN_SAMPLE, MIN_SPAN_DAYS, benchmark_note, benchmark_rows
-from .chat import _sanitize_citations, extract_updates, route
+from .chat import (
+    _is_duplicate, _sanitize_citations, _system, extract_updates, route, run_chat,
+)
 from .views import AdviseView
 from .screening import (
     ClaimScores, classify_roles, deployment_status, evidence_strength,
     final_weight, primary_role, product_utility,
 )
-from .llm import Meter, get_provider
+from .llm import Meter, Usage, get_provider
 
 User = get_user_model()
 
@@ -357,3 +359,70 @@ class ContributionMarginTest(TestCase):
         """공헌이익도 업종 벤치마크 대상 지표에 포함된다(차분 비교 가능)."""
         self.assertIn("contribution_margin", dict(METRIC_CHOICES))
         self.assertIn("unit_contribution_margin", dict(METRIC_CHOICES))
+
+
+class PersonaDisciplineTest(TestCase):
+    """P2 — 정체성 붕괴·중복 발화·날짜 날조 방지. A — 발화 강도 상한."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("disc", password="pass1234!")
+        self.m = Merchant.objects.create(
+            owner=self.user, name="규율카페", industry="cafe", location="서울")
+
+    def _sys(self, persona, **kw):
+        return _system(persona, self.m, self.m.baseline_card(), **kw)
+
+    def test_identity_lock_in_every_persona(self):
+        """모든 페르소나에 '다른 담당 자칭 금지'가 들어간다(획득이 유지를 자칭하던 버그)."""
+        for p in ("acq", "cvr", "ret", "fugu", "cora"):
+            self.assertIn("정체성 고정", self._sys(p))
+            self.assertIn("사칭", self._sys(p))
+
+    def test_claim_strength_gate_on_marketing_personas(self):
+        """A — 마케팅 담당은 '검증해볼 가설'까지만 허용. 인과 표현·수치 약속 금지."""
+        s = self._sys("acq")
+        self.assertIn("검증해볼 가설", s)
+        self.assertIn("인과 표현", s)
+        self.assertIn("약속하지 마라", s)
+        # 코라(세무)는 법령 근거라 이 규율 대상이 아니다
+        self.assertNotIn("근거 강도", self._sys("cora"))
+
+    def test_real_date_injected_not_fabricated(self):
+        """오늘 날짜를 실제 값으로 주입 — '오늘(5월 17일)' 날조 방지."""
+        today = timezone.localdate().isoformat()
+        for p in ("acq", "cvr", "ret", "cora"):
+            self.assertIn(today, self._sys(p))
+        self.assertIn("날짜·요일·수치를 지어내지 마라", self._sys("acq"))
+
+    def test_profit_rule_present(self):
+        """목적함수(공헌이익) 규율 + 원가율 미상 고지."""
+        s = self._sys("cvr")
+        self.assertIn("증분 공헌이익", s)
+        self.assertIn("공헌이익 미상", s)   # 변동비율 미입력 상태
+
+    def test_duplicate_reply_detection(self):
+        """동료 답변과 과도하게 겹치면 중복으로 판정."""
+        a = "RFM으로 단골을 세분화하면 재방문 흐름을 볼 수 있습니다. 적립 설계가 중요합니다."
+        self.assertTrue(_is_duplicate(a, a))                      # 완전 동일
+        self.assertTrue(_is_duplicate(a, a[:-10] + " 감사합니다."))  # 거의 동일
+        self.assertFalse(_is_duplicate(a, "객단가는 세트 구성으로 올릴 수 있습니다."))
+        self.assertFalse(_is_duplicate(a, ""))                    # 첫 발화는 비교대상 없음
+
+    def test_duplicate_second_turn_is_replaced(self):
+        """2인 협업에서 두 번째가 첫 답변을 복붙하면 코드가 잘라낸다."""
+        canned = "RFM으로 단골을 세분화하면 CLV를 추정할 수 있습니다 [M8]. 적립 설계가 핵심입니다."
+
+        class Dup:
+            name = "fake"; generator_model = router_model = "fake"
+            def chat(self, system, messages, max_tokens):
+                return canned, Usage(model="fake", input_tokens=5, output_tokens=5)
+            def complete(self, model, system, prompt, max_tokens=12):
+                return "ret,cvr", Usage(model="fake", input_tokens=1, output_tokens=1)
+
+        r = run_chat(self.m, [], "단골 관리와 객단가를 같이 올리고 싶은데 방법이 있을까요?",
+                     provider=Dup(), meter=Meter())
+        self.assertEqual(len(r["turns"]), 2)
+        self.assertFalse(r["turns"][0]["deduped"])
+        self.assertTrue(r["turns"][1]["deduped"])
+        self.assertEqual(r["turns"][1]["reply"], "덧붙일 내용은 없습니다.")
+        self.assertEqual(r["turns"][1]["citations"], [])   # 중복이면 인용칩도 안 붙는다

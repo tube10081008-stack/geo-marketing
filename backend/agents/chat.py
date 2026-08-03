@@ -10,6 +10,9 @@ merchant.baseline_card()를 맥락으로, 복어(Fugu)가 메시지를 적합 �
 에 영속 → 전체 이력이 DB에 남으면서도 토큰 소모는 상수로 유지된다.
 """
 import re
+from difflib import SequenceMatcher
+
+from django.utils import timezone
 
 from .corpus import retrieve
 from .llm import CHAT_MAX_TOKENS, Meter, get_provider
@@ -74,11 +77,32 @@ _CORA_RE = re.compile(
     r"세금계산서|현금영수증|기장|장부|간이과세|일반과세|노란우산|가산세|원천세|"
     r"4대\s*보험|홈택스|필요경비|증빙", re.I)
 
+# 페르소나 정체성 잠금 — 획득·전환이 "특히 유지 에이전트로서"라고 자칭하던 붕괴 방지
+_IDENTITY_LOCK = (
+    "\n[정체성 고정] 너는 위에 지정된 담당이며 그 이름으로만 말한다. 다른 담당"
+    "(획득/전환/유지/복어/코라)을 자칭하지 마라 — '유지 에이전트로서' 같이 네 담당이 "
+    "아닌 역할을 사칭하는 문장은 금지다. 네 영역 밖 주제는 자칭 대신 해당 담당에게 "
+    "넘기라고 안내하라.")
+
+# 근거 강도 통제(SCREENING.md) — 코퍼스는 해외·타업종·전문 미검증이라 상한이 '검증 가설'이다
+_CLAIM_STRENGTH = (
+    "\n[근거 강도 — 반드시 지켜라] [M#] 근거는 대부분 해외·타업종 연구이고 원문 전문 "
+    "검증 전이다. 따라서 허용되는 최대 강도는 '우리 매장에서 검증해볼 가설'까지다.\n"
+    "- 연구 결과와 우리 매장 적용을 분리해 말하라: '그 연구(맥락: 국가·업종)에서는 ~했다' "
+    "→ '우리 가게에선 ~를 시험해볼 수 있다'.\n"
+    "- 관찰연구에 '높인다 / 효과가 있다 / 유발한다' 같은 인과 표현을 쓰지 마라. "
+    "'관련이 관찰되었다', '함께 증감했다', '인과관계는 확인되지 않았다'로 말하라.\n"
+    "- 원 연구의 수치를 우리 가게의 기대효과처럼 약속하지 마라. '평점 1점 올리면 매출 "
+    "5~9% 오릅니다'는 금지 — 그것은 그 연구 맥락의 값이다.\n"
+    "- 확신이 필요하면 단정 대신 실측을 제안하라(실행 액션으로 잡아 전/후 비교).")
+
 # 유령 약속("복어님께 전달하겠다") 대화 붕괴 방지 — 모든 페르소나 공통 규칙
 _HONESTY = (
     "\n[정직 규칙] 너는 이 답변 밖에서 어떤 행동도 실행할 수 없다. "
     "'복어님께 전달하겠다', '곧 공유될 예정' 같은 실행되지 않는 백그라운드 작업을 약속하지 마라. "
-    "다른 에이전트나 복어의 발화를 지어내 끼워 넣지 마라. 확인할 수 없는 것은 모른다고 답하라.")
+    "다른 에이전트나 복어의 발화를 지어내 끼워 넣지 마라. 확인할 수 없는 것은 모른다고 답하라. "
+    "예시를 들 때 날짜·요일·수치를 지어내지 마라 — 오늘 날짜는 위에 주어진 값만 쓰고, "
+    "베이스라인에 없는 숫자를 사장님 가게의 값인 것처럼 말하지 마라.")
 
 # 비용·공격 방어(REVIEW §2): 서버가 신뢰 경계 — 프런트가 보낸 값은 절단한다
 MAX_MESSAGE_CHARS = 1000
@@ -125,6 +149,19 @@ def _sanitize_citations(reply, persona):
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)      # 토큰 제거로 생긴 이중 공백
     cleaned = re.sub(r"\s+([,.)])", r"\1", cleaned)   # 구두점 앞 공백 정리
     return cleaned.strip(), used
+
+
+# 2인 협업 시 두 번째 답변이 첫 답변과 이만큼 겹치면 중복으로 간주하고 잘라낸다.
+# (프롬프트의 '복사 금지' 규칙만으로는 막히지 않았다 — 코드로 집행)
+DUPLICATE_RATIO = 0.6
+_DUPLICATE_NOTICE = "덧붙일 내용은 없습니다."
+
+
+def _is_duplicate(reply, previous):
+    """직전 동료 답변과 과도하게 겹치는가(복붙·요약반복 방지)."""
+    if not reply or not previous:
+        return False
+    return SequenceMatcher(None, reply, previous).ratio() >= DUPLICATE_RATIO
 
 
 def route(message, forced, provider, meter):
@@ -215,6 +252,10 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
         base += _PROFIT_RULE
         if (card.get("profit") or {}).get("contribution_margin_rate_pct") is None:
             base += _NO_MARGIN_RULE
+        base += _CLAIM_STRENGTH
+    base += _IDENTITY_LOCK
+    # 실제 날짜를 준다 — 없으면 모델이 "오늘(5월 17일)"처럼 지어낸다
+    base += f"\n[오늘 날짜] {timezone.localdate().isoformat()}"
     base += _HONESTY
     if summary:
         base += f"\n\n[장기기억 — 이전 대화 요약]\n{summary[:SUMMARY_MAX_CHARS]}"
@@ -241,7 +282,7 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
         for h in (history or [])[-MAX_HISTORY_MESSAGES:]
     ]
     messages = trimmed + [{"role": "user", "text": message}]
-    turns, collab = [], None
+    turns, collab, prev_reply = [], None, ""
     for p in personas:
         label, kpi = _label(p)
         note = report_note if (p == "fugu" or mentions_report) else ""
@@ -256,8 +297,13 @@ def run_chat(merchant, history, message, forced=None, provider=None, meter=None,
         # 검증된 인용만: 본문의 [M#]/[T#] 중 이 담당 코퍼스에 실재하는 것만 남기고
         # 나머지(환각·오배정)는 본문·칩에서 제거 → 정직 원칙을 코드로 강제.
         reply, used_cites = _sanitize_citations(reply, p)
+        # 동료 답변 복붙 차단 — 사장님에게 같은 말이 두 번 보이지 않게 코드로 집행
+        deduped = _is_duplicate(reply, prev_reply)
+        if deduped:
+            reply, used_cites = _DUPLICATE_NOTICE, []
         turns.append({"persona": p, "label": label, "kpi": kpi, "reply": reply,
-                      "citations": used_cites})
+                      "citations": used_cites, "deduped": deduped})
+        prev_reply = reply
         collab = f"{label}: {reply}"[:600]  # 다음 페르소나 참조용 — 길이 상한(비용 방어)
 
     return {
