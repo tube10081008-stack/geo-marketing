@@ -13,6 +13,7 @@ from rest_framework.test import APIClient
 from decimal import Decimal
 
 from onboarding.models import (
+    CustomerTransaction,
     METRIC_CHOICES, ConversionBaseline, KpiSnapshot, Merchant,
     record_margin_snapshots,
 )
@@ -634,3 +635,72 @@ class CollabAndLengthTest(TestCase):
         self.assertEqual(_max_tokens_for("fugu"), 700)
         self.assertEqual(_max_tokens_for("cora"), CHAT_MAX_TOKENS * 3)  # 체크리스트형 유지
         self.assertLess(_max_tokens_for("acq"), CHAT_MAX_TOKENS)        # 이전보다 조여졌다
+
+
+class TransactionScopeTest(TestCase):
+    """거래로그 소유자 스코프 — 익명 조회·타인 업체 주입 차단(실제 유출 회귀 방지)."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user("txowner", password="pass1234!")
+        self.other = User.objects.create_user("txother", password="pass1234!")
+        self.m = Merchant.objects.create(
+            owner=self.owner, name="내카페", industry="cafe", location="서울",
+            consent_data_processing=True)
+        CustomerTransaction.objects.create(
+            merchant=self.m, customer_key="hash_abc", occurred_on="2026-07-01",
+            amount=15000)
+
+    def _client(self, user=None):
+        c = APIClient()
+        if user:
+            t, _ = Token.objects.get_or_create(user=user)
+            c.credentials(HTTP_AUTHORIZATION=f"Token {t.key}")
+        return c
+
+    def test_anonymous_cannot_list(self):
+        """익명 조회 차단 — 이게 실제로 뚫려 있었다(200 + 전체 레코드 노출)."""
+        r = self._client().get("/api/v1/onboarding/transactions/")
+        self.assertIn(r.status_code, (401, 403), r.content[:200])
+
+    def test_other_user_sees_nothing(self):
+        """남의 거래로그는 목록에 나오지 않는다."""
+        r = self._client(self.other).get("/api/v1/onboarding/transactions/")
+        self.assertEqual(r.status_code, 200)
+        rows = r.json() if isinstance(r.json(), list) else r.json().get("results", [])
+        self.assertEqual(rows, [])
+
+    def test_owner_sees_own(self):
+        r = self._client(self.owner).get("/api/v1/onboarding/transactions/")
+        rows = r.json() if isinstance(r.json(), list) else r.json().get("results", [])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["customer_key"], "hash_abc")
+
+    def test_other_user_cannot_read_detail(self):
+        tx = self.m.transactions.first()
+        r = self._client(self.other).get(f"/api/v1/onboarding/transactions/{tx.pk}/")
+        self.assertEqual(r.status_code, 404)
+
+    def test_cannot_inject_into_others_merchant(self):
+        """남의 업체에 거래를 주입할 수 없다(데이터 오염 방지)."""
+        r = self._client(self.other).post("/api/v1/onboarding/transactions/", {
+            "merchant": self.m.pk, "customer_key": "evil",
+            "occurred_on": "2026-07-02", "amount": 9999}, format="json")
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(self.m.transactions.count(), 1)
+
+    def test_anonymous_cannot_create(self):
+        r = APIClient().post("/api/v1/onboarding/transactions/", {
+            "merchant": self.m.pk, "customer_key": "evil",
+            "occurred_on": "2026-07-02", "amount": 9999}, format="json")
+        self.assertIn(r.status_code, (401, 403))
+        self.assertEqual(self.m.transactions.count(), 1)
+
+    def test_consent_gate_still_enforced(self):
+        """동의 없는 업체엔 여전히 적재 불가(기존 규칙 유지)."""
+        m2 = Merchant.objects.create(
+            owner=self.owner, name="미동의", industry="cafe", location="서울",
+            consent_data_processing=False)
+        r = self._client(self.owner).post("/api/v1/onboarding/transactions/", {
+            "merchant": m2.pk, "customer_key": "k", "occurred_on": "2026-07-02",
+            "amount": 1000}, format="json")
+        self.assertEqual(r.status_code, 403)
