@@ -1,5 +1,19 @@
 # 🔌 배포 가이드 — Fly.io(앱) + Neon(DB) + Vercel(프런트)
 
+## 현재 운영 중인 주소 (2026-08 이전 완료)
+
+| 구성 | 주소 / 설정 |
+|---|---|
+| 프런트 | https://geo-marketing-six.vercel.app (Root Directory = `web`) |
+| 백엔드 | https://geo-fugu-api.fly.dev — 헬스체크 `/api/v1/health/` |
+| Fly 앱 | `geo-fugu-api` · 리전 `sin` · `shared-cpu-1x`/512MB · **머신 1대** |
+| DB | Neon PostgreSQL 18 · `ap-southeast-1` · Direct connection |
+| 엔진 | Gemini 라이브 (`provider: gemini` 확인) |
+
+`fly secrets`에 들어 있는 값: `DJANGO_SECRET_KEY` / `DATABASE_URL` /
+`GEMINI_API_KEY` / `DJANGO_CSRF_TRUSTED_ORIGINS` / `CORS_ALLOWED_ORIGINS`.
+
+
 Render 무료 티어의 두 문제를 피하기 위한 구성이다.
 
 | Render 무료의 문제 | 이 구성의 해결 |
