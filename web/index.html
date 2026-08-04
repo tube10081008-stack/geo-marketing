@@ -361,7 +361,7 @@
         <button class="btn ghost" id="doRegister" type="button">새 계정 만들기</button>
       </div>
       <p style="font-size:11px; color:var(--faint); margin:12px 0 0">
-        무료 서버라 잠들어 있으면 첫 응답에 최대 1분이 걸릴 수 있어요.</p>
+        답변은 보통 2~3초 안에 도착해요. 근거를 함께 찾느라 조금 더 걸릴 때도 있습니다.</p>
     </div>
   </div>
 </div>
@@ -426,7 +426,10 @@ const $ = s => document.querySelector(s);
 let auth = null;   // {token, username}
 let mid = null;    // 서버 merchant id (로그인 모드)
 
-/* ── 백엔드 호출 헬퍼: 토큰 + 콜드스타트 토스트 ── */
+/* ── 백엔드 호출 헬퍼: 토큰 + 지연 안내 토스트 ──
+   Render 무료(15분 스핀다운) 시절엔 "서버를 깨우는 중"이 맞았지만, Fly로 옮긴 뒤
+   서버는 상시 가동이라 잠들지 않는다. 지금 3초 넘는 대기의 정체는 대부분
+   에이전트의 생성 시간(실측 1.4~6.7초, 중앙값 2.1초)이므로 문구를 사실에 맞췄다. */
 function toast(msg, ms=4000){
   let t = $('#toast');
   if (!t) { t = document.createElement('div'); t.id='toast'; document.body.appendChild(t); }
@@ -434,7 +437,8 @@ function toast(msg, ms=4000){
   clearTimeout(t._h); t._h = setTimeout(()=>{ t.hidden = true; }, ms);
 }
 async function api(path, opts={}){
-  const slow = setTimeout(()=>toast('무료 서버를 깨우는 중… 최대 1분 걸릴 수 있어요 ☕'), 3000);
+  // 4초 — 평균 생성 시간(약 2초)에는 뜨지 않고, 유독 느릴 때만 안심용으로 뜬다
+  const slow = setTimeout(()=>toast('답변을 작성하는 중이에요… 잠시만요 🐡'), 4000);
   try {
     const res = await fetch(BACKEND + path, {
       ...opts,
