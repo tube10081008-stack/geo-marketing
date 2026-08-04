@@ -10,9 +10,11 @@
 # - sk-ant-…   : Anthropic
 # - AQ.…       : Google 신형 토큰 형식(2026-08 실사용 확인 — 기존 AIza 정규식에 안 걸렸다)
 # - ghp_/gho_… : GitHub 토큰
+# - postgres://user:pw@… : DB 접속 문자열(암호 포함) — 2026-08 실수로 채팅에 붙은 사례 반영.
+#   DATABASE_URL 은 fly secrets / 대시보드에만 두고 저장소엔 자리표시자만 남긴다.
 set -uo pipefail
 
-PATTERN='AIza[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|AQ\.[A-Za-z0-9_-]{30,}|gh[pousr]_[A-Za-z0-9]{30,}'
+PATTERN='AIza[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|AQ\.[A-Za-z0-9_-]{30,}|gh[pousr]_[A-Za-z0-9]{30,}|postgres(ql)?://[^:/@<>[:space:]]+:[^@<>[:space:]]+@'
 
 cd "$(dirname "$0")/.."
 
@@ -24,4 +26,4 @@ if git grep -nIE "$PATTERN" -- . ':(exclude)scripts/check-secrets.sh'; then
   exit 1
 fi
 
-echo "✅ 키 누출 없음 (검사 패턴: AIza / sk-ant- / AQ. / gh*_)"
+echo "✅ 키 누출 없음 (검사 패턴: AIza / sk-ant- / AQ. / gh*_ / postgres URL)"
