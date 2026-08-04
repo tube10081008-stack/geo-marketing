@@ -27,7 +27,10 @@ DB 삭제 시계를 멈추는 게 급하다. 앱을 어디에 두든 이건 해�
    ```
 3. 무료 한도: 3 GiB / 브랜치. 만료 없음. 단, 한도 초과 시 다음 결제월까지 컴퓨트가 정지된다
 
-### 기존 Render DB에 살릴 데이터가 있다면
+### 기존 Render DB에 살릴 데이터가 있다면 (이번 이전에서는 건너뜀)
+
+> 이번 이전은 **데이터를 살리지 않기로 결정**했다(테스트 데이터뿐). 아래는 나중에
+> 참고용 — 운영 데이터가 쌓인 뒤 다시 옮길 일이 생기면 이 절차를 쓴다.
 
 **만료·삭제 전에** 반드시 먼저 뜬다:
 
@@ -54,10 +57,12 @@ pg_restore -d "postgresql://<neon-url>?sslmode=require" --no-owner --no-acl geo-
 fly auth login
 
 # 앱 생성 — 기존 fly.toml을 쓰므로 재설정하지 않는다
-fly launch --no-deploy --copy-config --name <전역-유일-이름> --region nrt
+fly launch --no-deploy --copy-config --name geo-fugu-api --region nrt
 ```
 
-`fly.toml`의 `app = "geo-marketing-api"`를 실제 만든 이름으로 맞춘다.
+`fly.toml`에는 `app = "geo-fugu-api"`가 들어 있다. 이 이름이 이미 선점됐다면
+`fly launch`가 알려주니, 다른 이름으로 만든 뒤 `fly.toml`과 `web/index.html`의
+`DEFAULT` 상수를 그 이름으로 맞춘다.
 
 ### 비밀값 주입
 
@@ -66,7 +71,7 @@ fly secrets set \
   DJANGO_SECRET_KEY="$(python3 -c 'import secrets;print(secrets.token_urlsafe(50))')" \
   DATABASE_URL='postgresql://...neon.tech/...?sslmode=require' \
   GEMINI_API_KEY='<Google AI Studio 키>' \
-  DJANGO_CSRF_TRUSTED_ORIGINS='https://<앱이름>.fly.dev'
+  DJANGO_CSRF_TRUSTED_ORIGINS='https://geo-fugu-api.fly.dev'
 # CORS_ALLOWED_ORIGINS 는 3단계(프런트 도메인 확보) 후에 넣는다
 ```
 
@@ -77,7 +82,7 @@ fly deploy          # release_command 가 migrate 를 먼저 돌린다(실패 �
 fly logs            # 기동 확인
 ```
 
-확인: `https://<앱>.fly.dev/api/v1/health/` → `{"status":"ok","provider":"gemini"}`
+확인: `https://geo-fugu-api.fly.dev/api/v1/health/` → `{"status":"ok","provider":"gemini"}`
 - `provider`가 `stub`이면 **`GEMINI_API_KEY`가 안 들어간 것**(데모 문구만 나오고 과금도 안 됨)
 
 ### 비용 감각
@@ -106,10 +111,11 @@ fly secrets set CORS_ALLOWED_ORIGINS='https://<프런트도메인>.vercel.app'
 미설정이면 `CORS_ALLOW_ALL_ORIGINS = True`로 동작한다(PoC 편의). **운영에서는 반드시 지정.**
 
 ### 프런트 → 백엔드 주소
-기본값은 `https://geo-marketing-api.onrender.com`이다. Fly로 옮겼으니 **재배포 없이** 바꾼다:
+기본값은 이미 `https://geo-fugu-api.fly.dev`로 맞춰져 있다.
+다른 이름으로 앱을 만들었다면 **프런트 재배포 없이** 이렇게 바꾼다:
 
 ```
-https://<프런트도메인>/?api=https://<앱이름>.fly.dev
+https://<프런트도메인>/?api=https://geo-fugu-api.fly.dev
 ```
 
 한 번 열면 `localStorage`에 저장되어 유지된다(https만 허용, 잘못된 값은 기본값으로 폴백).

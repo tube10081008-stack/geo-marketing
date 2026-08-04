@@ -2,7 +2,7 @@
 #
 # 앱 이름은 `fly launch` 시 실제로 만드는 이름으로 바꾼다(전역 유일해야 함).
 # 배포: 저장소 루트에서 `fly deploy` (Dockerfile도 루트에 있다)
-app = "geo-marketing-api"
+app = "geo-fugu-api"
 primary_region = "nrt"   # 도쿄 — 한국 사용자 지연 최소
 
 [build]
