@@ -5,18 +5,26 @@
 
 ```
 web/
-├─ index.html        # 온보딩 폼(빌드 불필요)
-├─ api/
-│  ├─ advise.py      # POST /api/advise — 첫 만남 베이스라인 → 1회 종합 액션(self-contained)
-│  └─ chat.py        # POST /api/chat — 세 에이전트와 멀티턴 대화(라우팅·핸드오프·계측)
-└─ requirements.txt  # 비어있음(외부 패키지 없음)
+├─ index.html        # 대시보드(빌드 불필요)
+├─ vercel.json       # 함수 설정(maxDuration)
+└─ api/
+   ├─ advise.py      # POST /api/advise — 베이스라인 → 1회 종합 액션(self-contained)
+   ├─ chat.py        # POST /api/chat — 에이전트 멀티턴 대화
+   └─ health.py      # GET  /api/health — 게스트 엔진 상태
 ```
+
+> ⚠️ **`requirements.txt`를 만들지 마세요.** 외부 패키지가 0개라 필요 없을 뿐 아니라,
+> 파일이 존재하면 Vercel이 `web/`을 **단일 Python 앱**으로 감지해
+> `No python entrypoint found ... Add [tool.vercel] entrypoint` 오류로 빌드가 실패합니다.
+> 파일이 없어야 `api/*.py`가 각각 독립 서버리스 함수로 잡힙니다.
+> (2026-08 실제 배포 실패로 확인 — 그래서 삭제했습니다.)
 
 ## 🚀 Vercel 배포 (택1)
 
 ### A. GitHub 연동 (권장)
 1. [vercel.com](https://vercel.com) → **Add New… → Project** → 이 레포 import
-2. **Root Directory = `marketing-orchestra/web`** 로 지정 ⭐ (중요)
+2. **Root Directory = `web`** 로 지정 ⭐ (중요)
+   *(독립 저장소로 분리되며 경로가 한 단계 올라왔다 — 옛 `marketing-orchestra/web` 아님)*
 3. **Environment Variables**에 추가:
    - `GEMINI_API_KEY = <당신의 Gemini 키>`  ← 코드/채팅 말고 여기에만
    - (선택) `GEO_GEMINI_GENERATOR`, `GEO_GEMINI_ROUTER`, `GEO_CREDIT_COST_USD`
@@ -24,7 +32,7 @@ web/
 
 ### B. CLI
 ```bash
-cd marketing-orchestra/web
+cd web
 npm i -g vercel
 vercel            # 첫 배포(프리뷰)
 vercel env add GEMINI_API_KEY   # 키 입력(프롬프트)

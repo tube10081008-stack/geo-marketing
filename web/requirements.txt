@@ -1,2 +1,0 @@
-# Vercel Python 서버리스 함수 의존성.
-# 외부 패키지 없음 — 표준 라이브러리(urllib·json·os·math)만 사용.

@@ -19,11 +19,15 @@ Render 무료 티어의 두 문제를 피하기 위한 구성이다.
 
 DB 삭제 시계를 멈추는 게 급하다. 앱을 어디에 두든 이건 해야 한다.
 
-1. [neon.com](https://neon.com) 가입 → 프로젝트 생성 (리전: **AWS ap-northeast-1 / Tokyo**)
+1. [neon.com](https://neon.com) 가입 → 프로젝트 생성
+   - **리전: AWS ap-southeast-1 (Singapore)** — Neon에 도쿄가 없다. 한국에서 가장 가깝다.
+   - **PostgreSQL 18** 선택 (Django 5.2의 최소 요구는 14라 여유롭게 통과)
+   - ⚠️ **Fly도 반드시 같은 리전(`sin`)** — Django는 요청 1건에 쿼리를 여러 번 날려
+     앱↔DB 지연이 곱해진다. 사용자↔앱 지연은 왕복 1회뿐이고 Gemini 호출(~2초)에 묻힌다.
 2. 연결 문자열 복사. **Pooled connection**이 아니라 **Direct connection**을 쓴다
    (Fly는 상시 프로세스라 `conn_max_age=600` 연결 재사용이 이득이다. 풀러는 서버리스용)
    ```
-   postgresql://<user>:<pw>@<host>.ap-northeast-1.aws.neon.tech/<db>?sslmode=require
+   postgresql://<user>:<pw>@<host>.ap-southeast-1.aws.neon.tech/<db>?sslmode=require
    ```
 3. 무료 한도: 3 GiB / 브랜치. 만료 없음. 단, 한도 초과 시 다음 결제월까지 컴퓨트가 정지된다
 
@@ -57,7 +61,7 @@ pg_restore -d "postgresql://<neon-url>?sslmode=require" --no-owner --no-acl geo-
 fly auth login
 
 # 앱 생성 — 기존 fly.toml을 쓰므로 재설정하지 않는다
-fly launch --no-deploy --copy-config --name geo-fugu-api --region nrt
+fly launch --no-deploy --copy-config --name geo-fugu-api --region sin
 ```
 
 `fly.toml`에는 `app = "geo-fugu-api"`가 들어 있다. 이 이름이 이미 선점됐다면
