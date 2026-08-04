@@ -68,16 +68,48 @@ class MerchantViewSet(viewsets.ModelViewSet):
 
 
 class CustomerTransactionViewSet(viewsets.ModelViewSet):
-    queryset = CustomerTransaction.objects.select_related("merchant")
+    """RFM 원천 거래로그 — 가명 키이지만 고객 행동 데이터다. 소유자 외 접근 금지.
+
+    ※ 과거 결함: permission_classes와 get_queryset이 없어 전역 기본값(AllowAny)이
+      적용됐고, 익명 요청으로 **전체 가맹점의 거래로그가 조회**됐다. 남의 업체에
+      거래를 주입하는 것도 가능했다. 아래 두 겹으로 막는다.
+    """
+
     serializer_class = CustomerTransactionSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # 소유자 스코프 — 남의 업체 거래로그는 조회·수정·삭제 모두 불가
+        return (CustomerTransaction.objects
+                .filter(merchant__owner=self.request.user)
+                .select_related("merchant"))
+
+    def _owned_merchant(self, merchant_id):
+        """요청자가 소유한 업체만 반환. 아니면 None(존재 여부도 알려주지 않는다)."""
+        return Merchant.objects.filter(
+            pk=merchant_id, owner=self.request.user).first()
 
     def create(self, request, *args, **kwargs):
-        """거래로그 적재 전 위탁처리 동의 확인(intake §4 개인정보 게이트)."""
-        merchant_id = request.data.get("merchant")
-        merchant = Merchant.objects.filter(pk=merchant_id).first()
-        if merchant and not merchant.consent_data_processing:
+        """적재 전 소유권 + 위탁처리 동의 확인(intake §4 개인정보 게이트)."""
+        merchant = self._owned_merchant(request.data.get("merchant"))
+        if merchant is None:
+            return Response(
+                {"detail": "존재하지 않거나 접근 권한이 없는 업체입니다."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not merchant.consent_data_processing:
             return Response(
                 {"detail": "고객데이터 위탁처리 동의가 필요합니다(intake §4)."},
                 status=status.HTTP_403_FORBIDDEN,
             )
         return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        """merchant를 남의 업체로 바꿔치기하는 경로도 막는다."""
+        target = request.data.get("merchant")
+        if target is not None and self._owned_merchant(target) is None:
+            return Response(
+                {"detail": "존재하지 않거나 접근 권한이 없는 업체입니다."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return super().update(request, *args, **kwargs)
