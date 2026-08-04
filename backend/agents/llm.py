@@ -27,6 +27,10 @@ CREDIT_COST_USD = float(os.environ.get("GEO_CREDIT_COST_USD", "0.01"))
 # 대화 응답 상한 — 600은 협업 턴에서 문장이 중간에 끊기는 원인이었다(버그 수정).
 CHAT_MAX_TOKENS = int(os.environ.get("GEO_CHAT_MAX_TOKENS", "1024"))
 
+# 상한 도달로 잘렸을 때 붙이는 안내. 침묵 절단은 어떤 경로에서도 금지한다.
+TRUNCATED_NOTICE = ("\n\n…(답변이 길어 여기서 잘렸어요 — "
+                    '"이어서"라고 보내시면 이어서 답합니다.)')
+
 
 @dataclass
 class Usage:
@@ -106,13 +110,16 @@ class GeminiProvider:
         text = "".join(p.get("text", "") for p in parts)
         # 문장 중간 침묵 절단 방지: 상한 도달을 감지해 이어보기 안내를 붙인다
         if notice_on_cut and cand.get("finishReason") == "MAX_TOKENS" and text:
-            text += "\n\n…(답변이 길어 여기서 잘렸어요 — \"이어서\"라고 보내시면 이어서 답합니다.)"
+            text += TRUNCATED_NOTICE
         um = data.get("usageMetadata", {})
         out = um.get("candidatesTokenCount", 0) + um.get("thoughtsTokenCount", 0)
         return text, Usage(model=model, input_tokens=um.get("promptTokenCount", 0), output_tokens=out)
 
     def complete(self, *, model, system, prompt, max_tokens=800):
-        return self._post(model, system, [{"role": "user", "parts": [{"text": prompt}]}], max_tokens)
+        # notice_on_cut=True 필수: 이게 빠져 있어 액션 플랜이 문장 중간에서
+        # 아무 안내 없이 끊겼다("고객에게 특별"에서 정지). 침묵 절단은 금지.
+        return self._post(model, system, [{"role": "user", "parts": [{"text": prompt}]}],
+                          max_tokens, notice_on_cut=True)
 
     def chat(self, *, system, messages, max_tokens=CHAT_MAX_TOKENS):
         return self._post(self.generator_model, system, _to_contents(messages), max_tokens,
@@ -132,7 +139,10 @@ class AnthropicProvider:
         resp = self._client().messages.create(
             model=model, max_tokens=max_tokens, system=system,
             messages=[{"role": "user", "content": prompt}])
-        return self._text(resp)
+        text, usage = self._text(resp)
+        if getattr(resp, "stop_reason", "") == "max_tokens" and text:
+            text += TRUNCATED_NOTICE
+        return text, usage
 
     def chat(self, *, system, messages, max_tokens=CHAT_MAX_TOKENS):
         conv = [{"role": "user" if m.get("role") == "user" else "assistant",
@@ -141,7 +151,7 @@ class AnthropicProvider:
             model=self.generator_model, max_tokens=max_tokens, system=system, messages=conv)
         text, usage = self._text(resp)
         if getattr(resp, "stop_reason", "") == "max_tokens" and text:
-            text += "\n\n…(답변이 길어 여기서 잘렸어요 — \"이어서\"라고 보내시면 이어서 답합니다.)"
+            text += TRUNCATED_NOTICE
         return text, usage
 
     def _text(self, resp):

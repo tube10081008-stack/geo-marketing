@@ -26,12 +26,15 @@ from .chat import (
     _max_tokens_for, _sanitize_citations, _system, extract_updates, route,
     run_chat,
 )
+from . import personas
 from .views import AdviseView
 from .screening import (
     ClaimScores, classify_roles, deployment_status, evidence_strength,
     final_weight, primary_role, product_utility,
 )
-from .llm import CHAT_MAX_TOKENS, Meter, Usage, get_provider
+from .llm import (
+    CHAT_MAX_TOKENS, TRUNCATED_NOTICE, GeminiProvider, Meter, Usage, get_provider,
+)
 
 User = get_user_model()
 
@@ -704,3 +707,73 @@ class TransactionScopeTest(TestCase):
             "merchant": m2.pk, "customer_key": "k", "occurred_on": "2026-07-02",
             "amount": 1000}, format="json")
         self.assertEqual(r.status_code, 403)
+
+
+class AdviseDisciplineTest(TestCase):
+    """액션 플랜(advise) 경로 — 침묵 절단·규율 미적용 회귀 방지.
+
+    실제 사고: 액션 플랜이 "고객에게 특별"에서 아무 안내 없이 끊겼다.
+    원인 두 겹 — (1) complete()가 notice_on_cut을 안 넘겨 침묵 절단
+                (2) 프롬프트에 분량 규율이 없어 장문이 생성되다 상한 도달
+    게다가 chat.py에만 넣은 규율(근거강도·공헌이익·정직)을 전부 우회했다.
+    """
+
+    def setUp(self):
+        u = User.objects.create_user("adv", password="pass1234!")
+        self.m = Merchant.objects.create(
+            owner=u, name="플랜카페", industry="cafe", location="서울")
+        self.card = self.m.baseline_card()
+
+    def _system_of(self, persona="cvr"):
+        """advise가 실제로 조립하는 시스템 프롬프트를 가로채 확인한다."""
+        seen = {}
+
+        class Spy:
+            name = "spy"; generator_model = router_model = "spy"
+            def complete(self, *, model, system, prompt, max_tokens=800):
+                seen["system"] = system
+                seen["max_tokens"] = max_tokens
+                return "액션 초안", Usage(model="spy", input_tokens=1, output_tokens=1)
+
+        personas.advise(persona, self.card, Spy(), Meter())
+        return seen
+
+    def test_length_rule_present(self):
+        """분량 규율이 프롬프트에 있다 — 이게 없어서 장문이 나오다 잘렸다."""
+        s = self._system_of()["system"]
+        self.assertIn("400자 이내", s)
+        self.assertIn("문장 중간에서 끝내지 마라", s)
+
+    def test_shared_rules_applied(self):
+        """chat에만 있던 규율이 advise에도 적용된다(경로 간 드리프트 방지)."""
+        s = self._system_of()["system"]
+        self.assertIn("근거 강도", s)        # CLAIM_STRENGTH
+        self.assertIn("증분 공헌이익", s)     # PROFIT_RULE
+        self.assertIn("정직 규칙", s)        # HONESTY
+
+    def test_token_ceiling_lowered(self):
+        """900 → 512. 분량 규율과 짝을 이루는 상한."""
+        self.assertEqual(self._system_of()["max_tokens"], personas.ADVISE_MAX_TOKENS)
+        self.assertEqual(personas.ADVISE_MAX_TOKENS, 512)
+
+    def test_no_margin_disclosure(self):
+        """변동비율 미입력이면 이익 효과를 단정하지 말라고 고지한다."""
+        self.assertIn("공헌이익 미상", self._system_of()["system"])
+
+    def test_truncation_notice_is_shared_constant(self):
+        """절단 안내가 상수 하나로 통일됐다(3곳 인라인 복붙 → 드리프트 방지)."""
+        self.assertIn("이어서", TRUNCATED_NOTICE)
+        self.assertIn("잘렸어요", TRUNCATED_NOTICE)
+
+    def test_gemini_complete_requests_cut_notice(self):
+        """complete()가 notice_on_cut=True로 호출한다 — 침묵 절단 금지의 핵심."""
+        got = {}
+
+        class FakeGemini(GeminiProvider):
+            def _post(self, model, system, contents, max_tokens, notice_on_cut=False):
+                got["notice_on_cut"] = notice_on_cut
+                return "x", Usage(model=model)
+
+        FakeGemini().complete(model="m", system="s", prompt="p")
+        self.assertTrue(got["notice_on_cut"],
+                        "complete()가 notice_on_cut을 넘기지 않으면 답변이 조용히 잘린다")
