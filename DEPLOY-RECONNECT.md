@@ -1,5 +1,19 @@
 # 🔌 배포 가이드 — Fly.io(앱) + Neon(DB) + Vercel(프런트)
 
+## 현재 운영 중인 주소 (2026-08 이전 완료)
+
+| 구성 | 주소 / 설정 |
+|---|---|
+| 프런트 | https://geo-marketing-six.vercel.app (Root Directory = `web`) |
+| 백엔드 | https://geo-fugu-api.fly.dev — 헬스체크 `/api/v1/health/` |
+| Fly 앱 | `geo-fugu-api` · 리전 `sin` · `shared-cpu-1x`/512MB · **머신 1대** |
+| DB | Neon PostgreSQL 18 · `ap-southeast-1` · Direct connection |
+| 엔진 | Gemini 라이브 (`provider: gemini` 확인) |
+
+`fly secrets`에 들어 있는 값: `DJANGO_SECRET_KEY` / `DATABASE_URL` /
+`GEMINI_API_KEY` / `DJANGO_CSRF_TRUSTED_ORIGINS` / `CORS_ALLOWED_ORIGINS`.
+
+
 Render 무료 티어의 두 문제를 피하기 위한 구성이다.
 
 | Render 무료의 문제 | 이 구성의 해결 |
@@ -151,8 +165,11 @@ https://<프런트도메인>/?api=https://geo-fugu-api.fly.dev
 
 ---
 
-## Render 관련 정리
+## Render 관련 (정리 완료)
 
-`render.yaml`은 롤백용으로 남겨둔다. 다만 Render Blueprint가 남아 있으면 **자동 동기화가
-옛 서비스를 계속 건드릴 수 있으니**, 이전이 끝나면 Render 쪽 Blueprint와 웹 서비스를 정리한다.
-**무료 DB는 만료 시각까지 두되, 데이터 덤프를 먼저 확보한 뒤 삭제**한다.
+**2026-08 기준 Render 리소스는 모두 삭제됨** — Blueprint·웹 서비스·무료 DB.
+데이터는 살리지 않기로 했다(테스트 데이터뿐이었다).
+
+`render.yaml`은 이력 참고용으로 남아 있으나 **더 이상 연결된 서비스가 없다.**
+Render로 되돌릴 일이 없다면 삭제해도 무방하다. 단, 파일이 남아 있는 한
+Render 계정에서 Blueprint를 새로 만들면 다시 동기화 대상이 되니 주의.
