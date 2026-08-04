@@ -3,7 +3,12 @@
 # 앱 이름은 `fly launch` 시 실제로 만드는 이름으로 바꾼다(전역 유일해야 함).
 # 배포: 저장소 루트에서 `fly deploy` (Dockerfile도 루트에 있다)
 app = "geo-fugu-api"
-primary_region = "nrt"   # 도쿄 — 한국 사용자 지연 최소
+# ★ DB(Neon)와 반드시 같은 리전에 둔다.
+# Django는 요청 1건에 쿼리를 여러 번 날리므로 앱↔DB 지연은 곱해지지만,
+# 사용자↔앱 지연은 왕복 1회뿐이고 Gemini 호출(~2초)에 묻힌다.
+# Neon에 도쿄(ap-northeast-1)가 없어 싱가포르로 맞췄다.
+# 나중에 Neon이 도쿄를 열면 양쪽을 함께 nrt로 옮긴다(한쪽만 옮기면 오히려 느려진다).
+primary_region = "sin"   # 싱가포르 — Neon ap-southeast-1과 동일 리전
 
 [build]
   dockerfile = "Dockerfile"
