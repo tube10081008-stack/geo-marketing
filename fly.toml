@@ -1,0 +1,49 @@
+# Fly.io 배포 설정 — 지오(GEO) 백엔드
+#
+# 앱 이름은 `fly launch` 시 실제로 만드는 이름으로 바꾼다(전역 유일해야 함).
+# 배포: 저장소 루트에서 `fly deploy` (Dockerfile도 루트에 있다)
+app = "geo-marketing-api"
+primary_region = "nrt"   # 도쿄 — 한국 사용자 지연 최소
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DJANGO_DEBUG = "False"
+  DJANGO_ALLOWED_HOSTS = ".fly.dev,localhost,127.0.0.1"
+  # Neon 등 관리형 Postgres는 SSL을 요구한다
+  DJANGO_DB_SSL_REQUIRE = "True"
+  # Fly가 TLS를 종단하고 X-Forwarded-Proto를 넘기므로 앱에서 리다이렉트하지 않는다
+  DJANGO_SECURE_SSL_REDIRECT = "False"
+
+# 배포 때마다 마이그레이션을 먼저 돌린다(실패하면 배포가 중단되어 안전).
+[deploy]
+  release_command = "python manage.py migrate --noinput"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # ★ 콜드스타트 제거의 핵심: 머신을 끄지 않는다.
+  #   Render 무료의 15분 스핀다운(첫 요청 30초+)을 피하려고 옮겨온 것이므로
+  #   auto_stop_machines 를 켜면 이사한 의미가 없다.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/api/v1/health/"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"   # Django + gunicorn 2워커. 256mb는 빠듯하다.
+
+# ── 대시보드에서 넣을 비밀값(코드·저장소에 두지 않는다) ──
+#   fly secrets set GEMINI_API_KEY=...
+#   fly secrets set DATABASE_URL='postgresql://...neon.tech/...?sslmode=require'
+#   fly secrets set DJANGO_SECRET_KEY="$(python -c 'import secrets;print(secrets.token_urlsafe(50))')"
+#   fly secrets set CORS_ALLOWED_ORIGINS=https://<프런트도메인>
+#   fly secrets set DJANGO_CSRF_TRUSTED_ORIGINS=https://<앱이름>.fly.dev
