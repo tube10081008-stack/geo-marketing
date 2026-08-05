@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 
 from django.utils import timezone
 
+from . import rules
 from .corpus import retrieve
 from .notes import notes_block
 from .llm import CHAT_MAX_TOKENS, Meter, get_provider
@@ -60,15 +61,6 @@ def _card_summary(card):
 
 
 # 목적함수 규율 — 매출↑을 이익↑으로 말하지 못하게 막는다(SCREENING.md P축)
-_PROFIT_RULE = (
-    "\n[목적함수] 최종 목표는 매출이 아니라 **증분 공헌이익**이다. "
-    "할인·증정·수수료가 붙는 제안은 매출을 늘리면서 이익을 줄일 수 있으니, "
-    "그 경우 원가 부담과 손익분기 판매량을 함께 짚어라. "
-    "매출 증가를 이익 증가라고 단정하지 마라.")
-_NO_MARGIN_RULE = (
-    "\n[공헌이익 미상] 이 가게는 변동비율(원가율)을 아직 알려주지 않았다. "
-    "따라서 이익 효과를 계산할 수 없다 — 이익이 늘어난다고 단정하지 말고, "
-    "필요하면 '원가율이 몇 %인지' 한 번 물어보라(그 숫자를 말하면 자동 기록된다).")
 
 
 # 목표/희망 발화("평점을 4.5로 올리고 싶어요")를 사실로 오인하지 않기 위한 의도어 가드(REVIEW §2)
@@ -112,24 +104,8 @@ _IDENTITY_LOCK = (
     "넘기라고 안내하라.")
 
 # 근거 강도 통제(SCREENING.md) — 코퍼스는 해외·타업종·전문 미검증이라 상한이 '검증 가설'이다
-_CLAIM_STRENGTH = (
-    "\n[근거 강도 — 반드시 지켜라] [M#] 근거는 대부분 해외·타업종 연구이고 원문 전문 "
-    "검증 전이다. 따라서 허용되는 최대 강도는 '우리 매장에서 검증해볼 가설'까지다.\n"
-    "- 연구 결과와 우리 매장 적용을 분리해 말하라: '그 연구(맥락: 국가·업종)에서는 ~했다' "
-    "→ '우리 가게에선 ~를 시험해볼 수 있다'.\n"
-    "- 관찰연구에 '높인다 / 효과가 있다 / 유발한다' 같은 인과 표현을 쓰지 마라. "
-    "'관련이 관찰되었다', '함께 증감했다', '인과관계는 확인되지 않았다'로 말하라.\n"
-    "- 원 연구의 수치를 우리 가게의 기대효과처럼 약속하지 마라. '평점 1점 올리면 매출 "
-    "5~9% 오릅니다'는 금지 — 그것은 그 연구 맥락의 값이다.\n"
-    "- 확신이 필요하면 단정 대신 실측을 제안하라(실행 액션으로 잡아 전/후 비교).")
 
 # 유령 약속("복어님께 전달하겠다") 대화 붕괴 방지 — 모든 페르소나 공통 규칙
-_HONESTY = (
-    "\n[정직 규칙] 너는 이 답변 밖에서 어떤 행동도 실행할 수 없다. "
-    "'복어님께 전달하겠다', '곧 공유될 예정' 같은 실행되지 않는 백그라운드 작업을 약속하지 마라. "
-    "다른 에이전트나 복어의 발화를 지어내 끼워 넣지 마라. 확인할 수 없는 것은 모른다고 답하라. "
-    "예시를 들 때 날짜·요일·수치를 지어내지 마라 — 오늘 날짜는 위에 주어진 값만 쓰고, "
-    "베이스라인에 없는 숫자를 사장님 가게의 값인 것처럼 말하지 마라.")
 
 # 비용·공격 방어(REVIEW §2): 서버가 신뢰 경계 — 프런트가 보낸 값은 절단한다
 MAX_MESSAGE_CHARS = 1000
@@ -331,14 +307,14 @@ def _system(persona, merchant, card, collab=None, summary="", report_note="",
             "전이한 것이므로, 조언 시 '이 업종 직접 연구는 아직 없고 인접 업종 근거를 "
             "옮겨온 것'임을 한 번 밝혀라. 이 업종에 대한 연구가 있는 것처럼 말하지 마라.")
     if persona != "cora":
-        base += _PROFIT_RULE
+        base += rules.PROFIT_RULE
         if (card.get("profit") or {}).get("contribution_margin_rate_pct") is None:
-            base += _NO_MARGIN_RULE
-        base += _CLAIM_STRENGTH
+            base += rules.NO_MARGIN_RULE
+        base += rules.CLAIM_STRENGTH
     base += _IDENTITY_LOCK
     # 실제 날짜를 준다 — 없으면 모델이 "오늘(5월 17일)"처럼 지어낸다
     base += f"\n[오늘 날짜] {timezone.localdate().isoformat()}"
-    base += _HONESTY
+    base += rules.HONESTY
     if summary:
         base += f"\n\n[장기기억 — 이전 대화 요약]\n{summary[:SUMMARY_MAX_CHARS]}"
     if collab:

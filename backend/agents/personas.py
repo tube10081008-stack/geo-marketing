@@ -5,7 +5,12 @@
 ③ 반드시 [M#] 출처 인용. 생성 phrasing은 생성 티어 모델(Sonnet)로 자연화하되,
 스텁 환경에서도 grounded 텍스트가 결정적으로 나오도록 호출부가 초안을 만든다.
 """
+from . import rules
 from .corpus import retrieve
+
+# 액션 1개 · 400자 목표에 여유를 둔 출력 상한.
+# 900이던 시절 프롬프트에 분량 규율이 없어 장문이 생성되다 침묵 절단됐다.
+ADVISE_MAX_TOKENS = 512
 
 PERSONA_META = {
     "acq": {"emoji": "🎣", "name": "획득", "kpi": "신규유입·노출·리뷰수"},
@@ -69,14 +74,24 @@ def advise(persona: str, card: dict, provider, meter) -> dict:
         f"너는 소상공인 마케팅 {PERSONA_META[persona]['name']} 전문가다. "
         f"담당 KPI: {PERSONA_META[persona]['kpi']}. "
         "반드시 아래 근거의 [M#]를 인용하고, 측정가능한 목표를 제시하라. "
-        "출처를 댈 수 없는 단정은 금지."
+        "출처를 댈 수 없는 단정은 금지.\n"
+        # 분량 규율이 없어 모델이 장문 보고서를 쓰다 상한에 걸려 문장 중간에서
+        # 끊겼다(실제 사고). 카드 UI에 들어갈 크기로 못박는다.
+        "[분량 — 반드시 지켜라] 액션 1개만, 전체 400자 이내로 써라. "
+        "제목·소제목·표를 만들지 말고 바로 실행 문장으로 시작하라. "
+        "배경 설명과 일반론은 빼고 '무엇을 · 어떻게 잴지'만 남겨라. "
+        "절대 문장 중간에서 끝내지 마라 — 400자 안에 마무리되게 계획해서 써라."
+        + rules.CLAIM_STRENGTH + rules.profit_rules(card) + rules.HONESTY
     )
     prompt = (
         f"[베이스라인]\n{card}\n\n[근거 코퍼스]\n{cite_lines}\n\n"
-        f"[초안 액션]\n{draft}\n\n위 초안을 사장님이 바로 실행할 1~2개 액션으로 다듬어라."
+        f"[초안 액션]\n{draft}\n\n위 초안을 사장님이 바로 실행할 액션 1개로 다듬어라."
     )
     text, usage = provider.complete(
-        model=provider.generator_model, system=system, prompt=prompt, max_tokens=900
+        model=provider.generator_model, system=system, prompt=prompt,
+        # 400자 목표에 여유를 둔 상한(한국어 약 1.5~2자/토큰).
+        # 규율을 지킨 답변은 잘리지 않고, 폭주한 답변만 안내와 함께 걸린다.
+        max_tokens=ADVISE_MAX_TOKENS,
     )
     meter.add(usage)
 
