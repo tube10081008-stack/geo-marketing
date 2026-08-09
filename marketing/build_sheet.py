@@ -40,7 +40,8 @@ BLOCKS = ["A", "B", "C"]
 ROUNDS = ["1", "2", "3"]
 CODES = [f"WJ-{b}{r}" for b in BLOCKS for r in ROUNDS]
 
-LOG_TOP, LOG_BOT = 4, 503          # 문의접수 데이터 영역
+LOG_EX = 4                          # 예시 행 (집계 범위 밖)
+LOG_TOP, LOG_BOT = 5, 503           # 문의접수 실데이터 영역
 DIST_TOP = 4                        # 배포기록 첫 행
 DIST_BOT = DIST_TOP + len(CODES) - 1
 DIST_SUM = DIST_BOT + 1
@@ -108,8 +109,33 @@ last = block_table(s, 6, "단지별 — 어디에 자원을 몰 것인가",
 r2 = block_table(s, last + 3, "회차별 — 반복 노출이 전환을 올리는가",
                  ["1차 배포", "2차 배포", "3차 배포"], "K", 1)
 
+# 채널별 — 전단 외 유입까지 본다.
+# 주의: 여기 '성사율'은 분모가 '문의 수'라 위 두 블록의 '전환율'(분모=배포 대수)과 다른 지표다.
+CHANNELS = ["QR문자", "전화", "카톡", "대면", "인스타", "네이버", "당근", "기타"]
+rc = r2 + 3
+s.cell(rc, 1, "채널별 — 어느 경로로 들어오는가").font = big
+for i, h in enumerate(["유입경로", "문의 수", "구독 전환", "성사율 (문의 대비)"], start=1):
+    c = s.cell(rc + 1, i, h)
+    c.font, c.fill, c.alignment, c.border = hdr, hdr_fill, ctr, box
+for j, ch in enumerate(CHANNELS):
+    rr = rc + 2 + j
+    s.cell(rr, 1, ch).font = bod
+    s.cell(rr, 2, f'=COUNTIFS(문의접수!$E${LOG_TOP}:$E${LOG_BOT},$A{rr})')
+    s.cell(rr, 3, f'=COUNTIFS(문의접수!$E${LOG_TOP}:$E${LOG_BOT},$A{rr},'
+                  f'문의접수!$F${LOG_TOP}:$F${LOG_BOT},"Y")')
+    s.cell(rr, 4, f'=IFERROR(C{rr}/B{rr},"")')
+    for i in range(1, 5):
+        c = s.cell(rr, i)
+        c.border = box
+        if i > 1:
+            c.font = bod
+            c.number_format = NUM if i < 4 else PCT
+s.cell(rc + 2 + len(CHANNELS), 1,
+       "※ 성사율의 분모는 '문의 수'입니다. 위 두 블록의 전환율(분모=배포 대수)과 다른 지표이니 "
+       "섞어서 비교하지 마세요.").font = note
+
 # 종합
-r = r2 + 3
+r = rc + len(CHANNELS) + 5
 s.cell(r, 1, "종합").font = big
 labs = [
     ("총 배포 대수", f"=배포기록!D{DIST_SUM}", NUM),
@@ -227,14 +253,14 @@ for i, h in enumerate(lheads, start=1):
     c = g.cell(3, i, h)
     c.font, c.fill, c.alignment, c.border = hdr, hdr_fill, ctr, box
 
-example = ["2026-08-12", "예시", "김○○", "010-0000-0000", "QR문자", "Y",
-           "2026-08-14", 80000, "← 예시 행입니다. 코드가 '예시'라 집계에 잡히지 않습니다."]
+example = ["2026-08-12", "WJ-A1", "김○○", "010-0000-0000", "QR문자", "Y",
+           "2026-08-14", 80000, "← 예시 행. 집계 범위(5행부터) 밖이라 숫자에 잡히지 않습니다. 덮어쓰거나 지우세요."]
 for i, v in enumerate(example, start=1):
-    c = g.cell(LOG_TOP, i, v)
+    c = g.cell(LOG_EX, i, v)
     c.font, c.fill, c.border = note, ex_fill, box
-g.cell(LOG_TOP, 8).number_format = WON
+g.cell(LOG_EX, 8).number_format = WON
 
-for r in range(LOG_TOP + 1, LOG_TOP + 40):
+for r in range(LOG_TOP, LOG_TOP + 40):
     for i in range(1, 10):
         c = g.cell(r, i)
         c.font, c.border = inp, box
@@ -245,13 +271,13 @@ for r in range(LOG_TOP + 1, LOG_TOP + 40):
 
 dv_code = DataValidation(type="list", formula1='"' + ",".join(CODES) + '"',
                          allow_blank=True, showDropDown=False)
-dv_route = DataValidation(type="list", formula1='"QR문자,전화,카톡,대면,기타"',
+dv_route = DataValidation(type="list", formula1='"QR문자,전화,카톡,대면,인스타,네이버,당근,기타"',
                           allow_blank=True, showDropDown=False)
 dv_yn = DataValidation(type="list", formula1='"Y,N"',
                        allow_blank=True, showDropDown=False)
 for dv, col in ((dv_code, "B"), (dv_route, "E"), (dv_yn, "F")):
     g.add_data_validation(dv)
-    dv.add(f"{col}{LOG_TOP + 1}:{col}{LOG_BOT}")
+    dv.add(f"{col}{LOG_TOP}:{col}{LOG_BOT}")
 
 g.cell(LOG_TOP + 41, 1,
        "※ '구독 전환'에 Y를 넣는 순간 배포기록·요약의 전환율이 함께 움직입니다.").font = note
@@ -286,7 +312,7 @@ rows = [
     ("주의", ""),
     ("배포 대수를 빠뜨리지 마세요", "문의 수는 분자, 배포 대수는 분모입니다. "
                                     "분모가 없으면 전환율이 안 나오고 실험 전체가 무의미해집니다."),
-    ("문의접수 4행은 예시입니다", "코드가 '예시'라 집계에 잡히지 않습니다. 지우셔도 됩니다."),
+    ("문의접수 4행은 예시입니다", "집계는 5행부터입니다. 덮어쓰거나 지우셔도 됩니다."),
     ("판정 기준 3%", "'요약' B4에서 바꿀 수 있습니다. 플레이북 §7.2 보수 시나리오의 하한값입니다."),
 ]
 for i, (a, b) in enumerate(rows, start=2):
