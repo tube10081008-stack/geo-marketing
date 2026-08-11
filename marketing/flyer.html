@@ -1,0 +1,309 @@
+<title>CARPRO WASH — 단지별 식별코드 전단 (A5 양면)</title>
+<style>
+  :root{
+    --shell:#e9edf2; --shell-ink:#0f1a26; --shell-ink-2:#4a5a6b; --shell-line:#cfd8e2;
+    --panel:#ffffff; --panel-2:#f4f7fa;
+    --navy:#16365f; --navy-2:#0f2744; --accent:#0f7fbd;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    --sans:"Pretendard","Pretendard Variable",-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --shell:#0b131b; --shell-ink:#e2eaf3; --shell-ink-2:#9fb0c2; --shell-line:#243444;
+    --panel:#121e29; --panel-2:#182634;
+  }}
+  :root[data-theme="dark"]{
+    --shell:#0b131b; --shell-ink:#e2eaf3; --shell-ink-2:#9fb0c2; --shell-line:#243444;
+    --panel:#121e29; --panel-2:#182634;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--shell);color:var(--shell-ink);font-family:var(--sans);word-break:keep-all;-webkit-font-smoothing:antialiased}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ── 화면 전용 조작부 ─────────────────────── */
+  .ctl{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--shell-line);padding:14px 20px;box-shadow:0 4px 20px -12px rgba(0,0,0,.5)}
+  .ctl-in{max-width:1000px;margin:0 auto;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end}
+  .fld{display:flex;flex-direction:column;gap:5px}
+  .fld label{font:600 10.5px/1.3 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--shell-ink-2)}
+  .fld input,.fld select{font-family:var(--sans);font-size:14px;padding:7px 10px;border:1px solid var(--shell-line);border-radius:3px;background:var(--panel-2);color:var(--shell-ink);min-width:132px}
+  .fld input:focus,.fld select:focus{border-color:var(--accent)}
+  .grow{flex:1 1 180px}
+  .btn{font-family:var(--sans);font-size:14px;font-weight:700;padding:9px 20px;border:0;border-radius:3px;background:var(--navy);color:#fff;cursor:pointer}
+  .btn:hover{background:var(--navy-2)}
+  .now{font:700 13px/1.4 var(--mono);color:var(--accent);padding-bottom:9px}
+  .hint{max-width:1000px;margin:10px auto 0;font-size:12.5px;line-height:1.65;color:var(--shell-ink-2)}
+  .hint b{color:var(--shell-ink)}
+
+  .stage{padding:26px 20px 60px;display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}
+  .sheetwrap{display:flex;flex-direction:column;gap:8px;align-items:center}
+  .sheetlbl{font:600 10.5px/1.4 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--shell-ink-2)}
+
+  /* ── 전단 본체 · A5 148×210mm ───────────────
+     종이는 종이다 — 다크모드와 무관하게 색을 고정한다 */
+  .page{
+    width:148mm;height:210mm;background:#fff;color:#0f1a26;
+    position:relative;overflow:hidden;display:flex;flex-direction:column;
+    box-shadow:0 2px 6px rgba(15,26,38,.14),0 18px 44px -22px rgba(15,26,38,.6);
+  }
+
+  /* 헤더 */
+  .hd{background:#16365f;color:#fff;padding:9mm 10mm 7mm;flex:none}
+  .hd .wordmark{font-size:26px;font-weight:800;letter-spacing:.02em;line-height:1;margin:0}
+  .hd .tag{margin:3mm 0 0;font-size:11.5px;font-weight:500;color:#a8c6e6;letter-spacing:-.01em}
+  .hd .rule{height:2px;background:linear-gradient(90deg,#4bb4e6,rgba(75,180,230,0));margin-top:4mm}
+
+  /* 무료 시공 고지 — 이 전단의 심리적 시작점(상호성). 광고가 아니라 '남기고 간 쪽지'다 */
+  .gift{margin:0;background:#0f7fbd;color:#fff;padding:4.2mm 10mm;flex:none}
+  .gift h2{margin:0 0 1.2mm;font-size:14px;font-weight:800;letter-spacing:-.03em;line-height:1.3}
+  .gift p{margin:0;font-size:10px;line-height:1.55;color:#e2f2fb}
+  .gift b{color:#fff;font-weight:800}
+
+  /* 크롬 플레이트 — 기존 인쇄물의 80,000원 배지를 계승 */
+  .plate{margin:5mm 10mm 0;background:linear-gradient(166deg,#f6f8fa 0%,#e6ebf1 46%,#c2ccd7 100%);
+         border:1px solid #b9c4d0;padding:5mm 6mm;display:flex;align-items:center;gap:5mm;flex:none}
+  .plate .lhs{font-size:13px;font-weight:800;line-height:1.35;color:#16365f;white-space:nowrap}
+  .plate .lhs small{display:block;font-size:10px;font-weight:600;color:#4a5a6b;letter-spacing:.02em}
+  .plate .price{margin-left:auto;font-size:40px;font-weight:800;letter-spacing:-.035em;line-height:.95;color:#0f1a26;font-variant-numeric:tabular-nums}
+  .plate .price small{font-size:17px;letter-spacing:-.02em}
+  .plate-sub{margin:0 10mm;background:#16365f;color:#dceaf7;font-size:10px;font-weight:600;padding:2.2mm 6mm;letter-spacing:-.01em;flex:none}
+
+  /* 3대 가치 */
+  .vals{margin:6mm 10mm 0;display:flex;flex-direction:column;gap:3.6mm;flex:none}
+  .val{display:flex;gap:4mm;align-items:flex-start}
+  .val .no{font:800 10px/1 var(--mono);color:#0f7fbd;border:1.2px solid #0f7fbd;border-radius:50%;width:6.2mm;height:6.2mm;display:flex;align-items:center;justify-content:center;flex:none;margin-top:.4mm}
+  .val h3{margin:0 0 1mm;font-size:13px;font-weight:800;letter-spacing:-.02em;line-height:1.3;color:#16365f}
+  .val p{margin:0;font-size:10.5px;line-height:1.62;color:#3c4a5a}
+
+  .spacer{flex:1 1 auto;min-height:3mm}
+
+  /* ── 식별장치 — 이 전단의 존재 이유 ────────── */
+  .track{margin:0 10mm 5mm;border:1.4px solid #16365f;display:flex;flex:none}
+  .track .qr{width:31mm;padding:3.4mm;background:#fff;border-right:1.4px solid #16365f;display:flex;flex-direction:column;gap:1.6mm;align-items:center;flex:none}
+  .track .qr svg{width:100%;height:auto;display:block}
+  .track .qr span{font-size:7.2px;font-weight:700;color:#16365f;text-align:center;line-height:1.35;letter-spacing:-.02em}
+  .track .rhs{padding:3.6mm 4.4mm;display:flex;flex-direction:column;justify-content:center;gap:1.4mm;min-width:0}
+  .track .eyebrow{font:700 7.6px/1.3 var(--mono);letter-spacing:.16em;color:#6b7a8c}
+  .track .code{font:800 25px/1 var(--mono);letter-spacing:.01em;color:#16365f}
+  .track .offer{font-size:10.5px;line-height:1.5;color:#0f1a26;font-weight:600}
+  .track .offer b{color:#c0392b;font-weight:800}
+
+  /* 푸터 */
+  .ft{background:#16365f;color:#fff;padding:4.4mm 10mm;display:flex;flex-wrap:wrap;gap:1mm 5mm;align-items:baseline;font-size:10px;flex:none;margin-top:auto}
+  .ft .ph{font-size:15px;font-weight:800;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+  .ft .sep{color:#5f87b5}
+  .ft .loc{color:#a8c6e6}
+
+  /* ── 뒷면 ──────────────────────────────── */
+  .bk{padding:7.5mm 10mm 0;flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
+  .bk h2{margin:0 0 2mm;font-size:16.5px;font-weight:800;letter-spacing:-.028em;line-height:1.3;color:#16365f}
+  .bk .lead{margin:0 0 4mm;font-size:10.5px;line-height:1.62;color:#3c4a5a}
+  .bk h4{margin:0 0 1.4mm;font-size:11.5px;font-weight:800;color:#0f1a26;letter-spacing:-.02em}
+  .bk .blk{margin-bottom:2.6mm}
+  .bk .blk p{margin:0;font-size:10px;line-height:1.6;color:#3c4a5a}
+  .cyc{width:100%;border-collapse:collapse;font-size:9.6px;margin-bottom:3.4mm}
+  .cyc th{background:#16365f;color:#fff;font-size:8.6px;font-weight:700;padding:1.8mm 2.4mm;text-align:left;letter-spacing:.02em}
+  .cyc td{border-bottom:1px solid #dde4ec;padding:1.6mm 2.4mm;color:#3c4a5a;line-height:1.45;vertical-align:top}
+  .cyc td:first-child{font-weight:800;color:#16365f;white-space:nowrap;font-family:var(--mono);font-size:9px}
+  .cyc tr:last-child td{border-bottom:0}
+  .legal{background:#f2f6fa;border-left:2.4px solid #0f7fbd;padding:2.6mm 4mm;margin-bottom:3.4mm}
+  .legal p{margin:0;font-size:9.6px;line-height:1.58;color:#3c4a5a}
+  .legal b{color:#16365f}
+  .faq{margin:0 0 4mm}
+  .faq dt{font-size:9.8px;font-weight:800;color:#16365f;margin-bottom:.5mm}
+  .faq dd{margin:0 0 2.2mm;font-size:9.6px;line-height:1.55;color:#3c4a5a}
+  .faq dd:last-child{margin-bottom:0}
+  .bk-code{margin-top:auto;padding:2.6mm 0 4mm;border-top:1px dashed #b9c4d0;display:flex;justify-content:space-between;align-items:baseline;gap:3mm}
+  .bk-code .l{font-size:9px;color:#6b7a8c;line-height:1.4}
+  .bk-code .c{font:800 13px/1 var(--mono);color:#16365f;white-space:nowrap}
+
+  /* ── 인쇄 ────────────────────────────────── */
+  @page{size:A5;margin:0}
+  @media print{
+    .ctl,.hint,.sheetlbl{display:none!important}
+    body{background:#fff}
+    .stage{display:block;padding:0;gap:0}
+    .sheetwrap{display:block}
+    .page{box-shadow:none;width:148mm;height:210mm;break-after:page;page-break-after:always}
+    .stage .sheetwrap:last-child .page{break-after:auto;page-break-after:auto}
+    *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="ctl">
+  <div class="ctl-in">
+    <div class="fld grow">
+      <label for="dong">단지명 (뒷면 하단 표기)</label>
+      <input id="dong" type="text" value="운정 아이파크" autocomplete="off">
+    </div>
+    <div class="fld">
+      <label for="blk">단지 코드</label>
+      <select id="blk">
+        <option value="A">A — 1번 단지</option>
+        <option value="B">B — 2번 단지</option>
+        <option value="C">C — 3번 단지</option>
+      </select>
+    </div>
+    <div class="fld">
+      <label for="rnd">배포 회차</label>
+      <select id="rnd">
+        <option value="1">1차</option>
+        <option value="2">2차</option>
+        <option value="3">3차</option>
+      </select>
+    </div>
+    <div class="now">현재 코드 <span id="nowcode">WJ-A1</span></div>
+    <button class="btn" id="print" type="button">인쇄 / PDF 저장</button>
+  </div>
+  <p class="hint"><b>인쇄 전 확인:</b> 브라우저 인쇄창에서 용지 <b>A5</b>, 배율 <b>100%</b>, <b>배경 그래픽 켜기</b>. 인쇄소에 넘길 땐 이 화면에서 <b>PDF로 저장</b>한 파일을 보내세요 — HTML을 그대로 넘기면 글꼴이 바뀝니다. QR은 <b>아이폰·안드로이드에서 각각 한 번 스캔해보고</b> 대량 인쇄하세요.</p>
+</div>
+
+<div class="stage">
+  <div class="sheetwrap">
+    <div class="sheetlbl">앞면</div>
+    <div class="page">
+      <div class="hd">
+        <p class="wordmark">CARPRO WASH</p>
+        <p class="tag">주차된 그대로, 매주 한 번 · 파주/운정</p>
+        <div class="rule"></div>
+      </div>
+
+      <div class="gift">
+        <h2>방금 이 차량의 타이어를 무료로 코팅해 드렸습니다.</h2>
+        <p>지나가다 사이드월이 갈변된 것이 보여 <b>제 시연 겸</b> 시공했습니다. 한번 확인해보세요. <b>비용은 받지 않습니다.</b></p>
+      </div>
+
+      <div class="plate">
+        <div class="lhs">월 4회<br>정기관리<small>주 1회 방문</small></div>
+        <div class="price">80,000<small>원</small></div>
+      </div>
+      <div class="plate-sub">요일을 정해두면 매주 그 시간에 갑니다. 차를 옮기실 필요도, 집에 계실 필요도 없습니다.</div>
+
+      <div class="vals">
+        <div class="val">
+          <div class="no">1</div>
+          <div>
+            <h3>차는 그 자리에 두시면 됩니다</h3>
+            <p>주차된 상태 그대로 시공합니다. 열쇠도, 이동도, 기다림도 필요 없습니다. 끝나면 사진으로 보내드립니다.</p>
+          </div>
+        </div>
+        <div class="val">
+          <div class="no">2</div>
+          <div>
+            <h3>씻을수록 잔기스가 느는 걸 막습니다</h3>
+            <p>고압수 대신 폴리머로 오염을 띄워 걷어냅니다. 한 대에 극세사 타월 12장을 쓰고, 쓴 것은 다시 담그지 않습니다.</p>
+          </div>
+        </div>
+        <div class="val">
+          <div class="no">3</div>
+          <div>
+            <h3>눈치 볼 일이 없습니다</h3>
+            <p>물도 배수구도 쓰지 않아 바닥에 한 방울도 남지 않습니다. 관리사무소도 이웃도 문제 삼을 것이 없습니다.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="track">
+        <div class="qr">
+          <div id="qrbox"></div>
+          <span>카메라로 찍으면<br>문자가 자동 작성됩니다</span>
+        </div>
+        <div class="rhs">
+          <div class="eyebrow">고객 코드</div>
+          <div class="code" id="code-front">WJ-A1</div>
+          <div class="offer">문의하실 때 이 코드를 말씀해주시면<br><b>첫 달 10,000원 할인</b>해 드립니다.</div>
+        </div>
+      </div>
+
+      <div class="ft">
+        <span>대표 <b>홍성현</b></span>
+        <span class="sep">|</span>
+        <span class="ph">010-5931-4144</span>
+        <span class="sep">|</span>
+        <span class="loc">운정법조타운 8층</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheetwrap">
+    <div class="sheetlbl">뒷면</div>
+    <div class="page">
+      <div class="bk">
+        <h2>물을 안 쓰는데<br>왜 더 깨끗할까요?</h2>
+        <p class="lead">물로 미는 세차는 모래를 <em>끌고 다닙니다</em>. 그래서 씻을수록 잔기스가 늡니다. 저희는 순서를 바꿉니다 — <strong>먼저 화학으로 오염을 떼어내고, 그 다음에 닦습니다.</strong></p>
+
+        <div class="blk">
+          <h4>1단계 — 오염별 맞춤 분해</h4>
+          <p>벌레·매연 같은 유기물은 알칼리로, 물자국·물때 같은 미네랄은 산성으로 각각 분해합니다. 오염마다 성질이 달라 하나의 세제로는 안 됩니다.</p>
+        </div>
+        <div class="blk">
+          <h4>2단계 — 폴리머로 띄우기</h4>
+          <p>남은 미세 입자를 폴리머가 캡슐처럼 감싸 도장면에서 띄웁니다. 이 상태에서는 입자가 도장면에 닿아 끌리지 않습니다.</p>
+        </div>
+        <div class="blk">
+          <h4>3단계 — 한 면에 한 번만</h4>
+          <p>타월은 한 면으로 한 번만 닦고 즉시 새 면으로 넘깁니다. 차 한 대에 극세사 타월을 <strong>12장</strong> 쓰고, 쓴 타월은 다시 담그지 않습니다.</p>
+        </div>
+
+        <h4 style="margin-bottom:2mm">월 4회, 매주 다른 관리 — 시공 전후 사진을 매번 보내드립니다</h4>
+        <table class="cyc">
+          <thead><tr><th>주차</th><th>이번 주 관리 내용</th></tr></thead>
+          <tbody>
+            <tr><td>1주</td><td>외장 전체 + 실내 먼지·매트 정리</td></tr>
+            <tr><td>2주</td><td>외장 전체 + 유리 내측 유막 제거 <em>(야간 시야 개선)</em></td></tr>
+            <tr><td>3주</td><td>외장 전체 + 가죽 보습 · 대시보드 무광 코팅</td></tr>
+            <tr><td>4주</td><td>외장 전체 + 타이어 코팅 · 물자국 집중 제거</td></tr>
+          </tbody>
+        </table>
+
+        <div class="legal">
+          <p><b>관리사무소에서 제지받을 일이 없습니다.</b> 물도, 배수구도, 전기도, 소음도 쓰지 않습니다. 오폐수를 한 방울도 흘리지 않아 지하주차장에서 합법적으로 시공합니다.</p>
+        </div>
+
+        <h4 style="margin-bottom:2mm">자주 묻는 질문</h4>
+        <dl class="faq">
+          <dt>제가 차에 없어도 되나요?</dt>
+          <dd>네. 주차된 상태 그대로 시공합니다. 열쇠도, 이동도 필요 없습니다.</dd>
+          <dt>비 오는 날은 어떻게 하나요?</dt>
+          <dd>지하주차장에서 시공하므로 날씨와 무관하게 요일이 지켜집니다.</dd>
+          <dt>많이 더러운 상태여도 되나요?</dt>
+          <dd>흙·모래가 두껍게 앉았다면 흠집 위험이 있어 먼저 알려드립니다.</dd>
+        </dl>
+
+        <div class="bk-code">
+          <div class="l">시공 문의 <strong>010-5931-4144</strong><br><span id="dong-out">운정 아이파크</span> 담당</div>
+          <div class="c" id="code-back">WJ-A1</div>
+        </div>
+      </div>
+
+      <div class="ft">
+        <span>CARPRO WASH</span>
+        <span class="sep">|</span>
+        <span>대표 <b>홍성현</b></span>
+        <span class="sep">|</span>
+        <span class="loc">운정법조타운 8층</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const QR = {"WJ-A1": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 37 37\" class=\"segno\"><path class=\"qrline\" stroke=\"#16365f\" d=\"M2 2.5h7m2 0h1m1 0h1m2 0h2m2 0h4m1 0h2m1 0h7m-33 1h1m5 0h1m2 0h1m2 0h1m3 0h2m3 0h4m1 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h2m1 0h1m1 0h4m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m3 0h2m1 0h1m3 0h1m4 0h2m2 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h1m1 0h2m3 0h2m1 0h1m4 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m1 0h1m1 0h2m4 0h1m1 0h5m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-24 1h2m2 0h1m3 0h6m-23 1h1m2 0h1m1 0h2m1 0h4m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1m1 0h1m-28 1h1m1 0h1m1 0h1m5 0h1m1 0h1m1 0h1m4 0h2m1 0h1m3 0h2m2 0h3m-32 1h2m1 0h1m1 0h2m3 0h2m2 0h1m1 0h1m1 0h1m1 0h1m3 0h1m3 0h2m-31 1h1m1 0h3m2 0h1m2 0h2m2 0h4m4 0h2m1 0h3m1 0h1m1 0h2m-31 1h2m2 0h3m1 0h1m1 0h1m9 0h1m1 0h2m1 0h4m1 0h1m-30 1h2m2 0h2m3 0h2m1 0h3m3 0h3m2 0h2m1 0h2m-29 1h1m1 0h1m1 0h1m3 0h4m3 0h2m1 0h1m1 0h1m4 0h2m2 0h1m-32 1h1m2 0h1m1 0h1m2 0h1m2 0h2m2 0h1m1 0h3m1 0h2m5 0h3m1 0h1m-33 1h2m1 0h1m2 0h1m1 0h1m1 0h1m1 0h2m3 0h3m1 0h1m1 0h1m1 0h4m2 0h2m-31 1h1m2 0h1m1 0h1m3 0h2m2 0h1m2 0h2m2 0h2m3 0h1m3 0h1m-32 1h1m1 0h1m1 0h1m1 0h4m1 0h2m1 0h3m1 0h1m2 0h2m2 0h1m3 0h1m2 0h1m-33 1h1m1 0h1m2 0h1m2 0h2m3 0h1m1 0h1m1 0h3m3 0h1m1 0h1m1 0h1m-28 1h5m1 0h1m2 0h1m3 0h1m1 0h5m1 0h2m1 0h1m1 0h3m1 0h1m1 0h1m-31 1h2m3 0h3m1 0h2m2 0h7m2 0h1m2 0h2m1 0h1m-31 1h2m3 0h2m1 0h1m4 0h1m1 0h1m2 0h1m1 0h1m1 0h2m1 0h2m3 0h1m1 0h1m-32 1h2m1 0h1m2 0h1m1 0h4m3 0h1m1 0h1m2 0h1m3 0h2m1 0h1m1 0h3m-33 1h1m2 0h4m5 0h2m1 0h2m2 0h1m1 0h9m2 0h1m-25 1h1m2 0h2m5 0h1m1 0h2m2 0h1m3 0h1m3 0h1m-33 1h7m2 0h1m1 0h1m1 0h4m7 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m1 0h3m1 0h2m5 0h1m1 0h2m3 0h1m2 0h1m-32 1h1m1 0h3m1 0h1m3 0h1m2 0h1m2 0h1m3 0h1m3 0h5m1 0h3m-33 1h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m-31 1h1m1 0h3m1 0h1m2 0h4m1 0h1m5 0h1m2 0h3m2 0h1m1 0h1m1 0h1m-33 1h1m5 0h1m2 0h3m3 0h4m2 0h5m4 0h1m-31 1h7m1 0h1m5 0h1m1 0h1m1 0h1m1 0h4m1 0h1m1 0h1m1 0h1m1 0h1\"/></svg>\n", "WJ-A2": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 37 37\" class=\"segno\"><path class=\"qrline\" stroke=\"#16365f\" d=\"M2 2.5h7m2 0h1m1 0h1m2 0h2m2 0h4m1 0h2m1 0h7m-33 1h1m5 0h1m2 0h1m2 0h1m3 0h2m3 0h4m1 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h2m1 0h1m1 0h4m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m3 0h1m2 0h1m3 0h1m4 0h2m2 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m4 0h2m3 0h2m1 0h1m4 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h2m2 0h2m4 0h1m1 0h5m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-23 1h1m2 0h1m3 0h6m-23 1h1m2 0h1m1 0h2m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1m1 0h1m-28 1h1m2 0h3m4 0h3m1 0h1m4 0h2m1 0h1m3 0h2m2 0h3m-32 1h2m1 0h1m1 0h1m5 0h1m2 0h1m1 0h1m1 0h1m1 0h1m3 0h1m3 0h2m-31 1h1m1 0h3m5 0h3m1 0h4m4 0h2m1 0h3m1 0h1m1 0h2m-30 1h1m2 0h1m1 0h1m1 0h1m1 0h1m9 0h1m1 0h2m1 0h4m1 0h1m-30 1h1m3 0h3m2 0h2m1 0h3m3 0h3m2 0h2m1 0h2m-31 1h1m1 0h1m1 0h1m1 0h1m2 0h5m3 0h2m1 0h1m1 0h1m4 0h2m2 0h1m-32 1h1m2 0h3m2 0h1m1 0h3m1 0h2m1 0h3m1 0h2m5 0h3m1 0h1m-30 1h2m1 0h1m6 0h1m3 0h3m1 0h1m1 0h1m1 0h4m2 0h2m-25 1h1m1 0h3m2 0h1m2 0h2m2 0h2m3 0h1m3 0h1m-32 1h1m1 0h1m1 0h1m1 0h1m2 0h1m1 0h1m2 0h3m1 0h1m2 0h2m2 0h1m3 0h1m2 0h1m-33 1h1m1 0h2m1 0h1m1 0h3m2 0h2m1 0h1m1 0h3m3 0h1m1 0h1m1 0h1m-28 1h5m1 0h1m2 0h1m3 0h1m1 0h5m1 0h2m1 0h1m1 0h3m1 0h1m1 0h1m-31 1h2m3 0h3m1 0h3m1 0h7m2 0h1m2 0h2m1 0h1m-31 1h2m2 0h1m1 0h1m1 0h2m4 0h2m1 0h2m1 0h1m1 0h2m1 0h2m3 0h1m1 0h1m-32 1h2m1 0h2m1 0h1m1 0h1m1 0h3m2 0h1m4 0h1m3 0h2m1 0h1m1 0h3m-33 1h1m4 0h2m1 0h2m2 0h1m1 0h3m2 0h1m1 0h9m2 0h1m-25 1h1m2 0h1m2 0h1m3 0h1m1 0h2m2 0h1m3 0h1m3 0h1m-33 1h7m2 0h1m3 0h4m7 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m1 0h3m1 0h2m5 0h1m1 0h2m3 0h1m2 0h1m-32 1h1m1 0h3m1 0h1m3 0h2m1 0h1m2 0h1m3 0h1m3 0h5m1 0h3m-33 1h1m1 0h3m1 0h1m1 0h3m4 0h1m1 0h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m-31 1h1m1 0h3m1 0h1m3 0h3m1 0h1m5 0h1m2 0h3m2 0h1m1 0h1m1 0h1m-33 1h1m5 0h1m2 0h3m1 0h6m2 0h5m4 0h1m-31 1h7m1 0h3m2 0h1m2 0h1m1 0h1m1 0h4m1 0h1m1 0h1m1 0h1m1 0h1\"/></svg>\n", "WJ-A3": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 37 37\" class=\"segno\"><path class=\"qrline\" stroke=\"#16365f\" d=\"M2 2.5h7m2 0h2m3 0h2m2 0h4m1 0h2m1 0h7m-33 1h1m5 0h1m2 0h1m1 0h2m3 0h2m3 0h4m1 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h2m1 0h1m1 0h4m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m3 0h2m1 0h1m3 0h1m4 0h2m2 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h1m1 0h2m3 0h2m1 0h1m4 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m3 0h2m4 0h1m1 0h5m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-24 1h2m2 0h1m3 0h6m-23 1h1m2 0h1m1 0h2m1 0h1m2 0h3m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1m1 0h1m-28 1h2m1 0h2m2 0h2m2 0h1m2 0h1m4 0h2m1 0h1m3 0h2m2 0h3m-32 1h1m2 0h1m1 0h1m4 0h2m2 0h1m1 0h1m1 0h1m1 0h1m3 0h1m3 0h2m-31 1h1m1 0h3m2 0h2m1 0h2m2 0h4m4 0h2m1 0h3m1 0h1m1 0h2m-31 1h2m2 0h1m1 0h1m1 0h3m9 0h1m1 0h2m1 0h4m1 0h1m-33 1h1m2 0h1m3 0h2m3 0h1m2 0h3m3 0h3m2 0h2m1 0h2m-30 1h2m2 0h2m2 0h4m1 0h1m2 0h2m1 0h1m1 0h1m4 0h2m2 0h1m-29 1h1m4 0h2m1 0h3m1 0h1m1 0h3m1 0h2m5 0h3m1 0h1m-30 1h2m1 0h1m1 0h1m8 0h3m1 0h1m1 0h1m1 0h4m2 0h2m-32 1h3m1 0h1m4 0h2m2 0h2m2 0h2m2 0h2m3 0h1m3 0h1m-32 1h1m2 0h2m1 0h1m1 0h2m1 0h1m2 0h3m1 0h1m2 0h2m2 0h1m3 0h1m2 0h1m-33 1h1m2 0h1m1 0h1m1 0h3m3 0h1m1 0h1m1 0h3m3 0h1m1 0h1m1 0h1m-28 1h5m1 0h1m2 0h1m1 0h1m1 0h1m1 0h5m1 0h2m1 0h1m1 0h3m1 0h1m1 0h1m-31 1h3m2 0h2m2 0h2m2 0h7m2 0h1m2 0h2m1 0h1m-31 1h2m2 0h3m1 0h1m1 0h1m2 0h3m1 0h2m1 0h1m1 0h2m1 0h2m3 0h1m1 0h1m-32 1h2m4 0h1m1 0h1m1 0h2m3 0h1m1 0h1m2 0h1m3 0h2m1 0h1m1 0h3m-33 1h1m3 0h3m1 0h3m2 0h1m1 0h2m2 0h1m1 0h9m2 0h1m-25 1h1m1 0h1m1 0h1m1 0h1m3 0h1m1 0h2m2 0h1m3 0h1m3 0h1m-33 1h7m2 0h1m1 0h1m1 0h4m7 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m1 0h3m1 0h2m5 0h1m1 0h2m3 0h1m2 0h1m-32 1h1m1 0h3m1 0h1m3 0h1m2 0h1m2 0h1m3 0h1m3 0h5m1 0h3m-33 1h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m-31 1h1m1 0h3m1 0h1m3 0h3m1 0h1m5 0h1m2 0h3m2 0h1m1 0h1m1 0h1m-33 1h1m5 0h1m2 0h1m1 0h1m1 0h6m2 0h5m4 0h1m-31 1h7m1 0h1m3 0h2m2 0h1m1 0h1m1 0h4m1 0h1m1 0h1m1 0h1m1 0h1\"/></svg>\n", "WJ-B1": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 37 37\" class=\"segno\"><path class=\"qrline\" stroke=\"#16365f\" d=\"M2 2.5h7m2 0h1m2 0h1m1 0h2m2 0h4m1 0h2m1 0h7m-33 1h1m5 0h1m2 0h1m2 0h1m3 0h2m3 0h4m1 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h2m1 0h1m1 0h4m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m3 0h2m1 0h1m3 0h1m4 0h2m2 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h1m1 0h2m3 0h2m1 0h1m4 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m3 0h2m4 0h1m1 0h5m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-24 1h2m2 0h1m3 0h6m-23 1h1m2 0h1m1 0h2m1 0h2m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1m1 0h1m-28 1h2m1 0h3m4 0h3m1 0h1m4 0h2m1 0h1m3 0h2m2 0h3m-32 1h4m1 0h1m4 0h2m2 0h1m1 0h1m1 0h1m1 0h1m3 0h1m3 0h2m-31 1h1m2 0h2m2 0h1m2 0h1m3 0h4m4 0h2m1 0h3m1 0h1m1 0h2m-31 1h2m2 0h1m1 0h1m1 0h3m9 0h1m1 0h2m1 0h4m1 0h1m-33 1h1m2 0h1m3 0h3m2 0h1m2 0h3m3 0h3m2 0h2m1 0h2m-30 1h2m3 0h1m3 0h3m5 0h1m1 0h1m1 0h1m4 0h2m2 0h1m-32 1h2m1 0h1m4 0h2m1 0h5m1 0h1m1 0h1m1 0h2m5 0h3m1 0h1m-33 1h1m2 0h4m1 0h1m1 0h1m2 0h1m3 0h3m1 0h1m1 0h1m1 0h4m2 0h2m-32 1h1m5 0h1m2 0h1m3 0h2m2 0h2m2 0h2m3 0h1m3 0h1m-32 1h1m1 0h1m1 0h1m1 0h4m2 0h1m1 0h3m1 0h1m2 0h2m2 0h1m3 0h1m2 0h1m-33 1h1m1 0h2m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m3 0h1m1 0h1m1 0h1m-28 1h2m1 0h2m1 0h2m1 0h1m1 0h1m1 0h1m1 0h5m1 0h2m1 0h1m1 0h3m1 0h1m1 0h1m-31 1h2m3 0h2m2 0h3m1 0h7m2 0h1m2 0h2m1 0h1m-31 1h2m2 0h1m1 0h1m1 0h3m2 0h1m1 0h1m2 0h1m1 0h1m1 0h2m1 0h2m3 0h1m1 0h1m-32 1h2m2 0h1m1 0h1m1 0h4m1 0h1m1 0h1m1 0h1m2 0h1m3 0h2m1 0h1m1 0h3m-33 1h1m2 0h4m1 0h3m1 0h5m2 0h1m1 0h9m2 0h1m-25 1h1m3 0h1m1 0h1m3 0h1m1 0h2m2 0h1m3 0h1m3 0h1m-33 1h7m2 0h1m1 0h6m7 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m1 0h3m1 0h2m5 0h1m1 0h2m3 0h1m2 0h1m-32 1h1m1 0h3m1 0h1m3 0h1m2 0h1m2 0h1m3 0h1m3 0h5m1 0h3m-33 1h1m1 0h3m1 0h1m1 0h3m2 0h1m1 0h1m1 0h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m-31 1h1m1 0h3m1 0h1m2 0h1m1 0h4m5 0h1m2 0h3m2 0h1m1 0h1m1 0h1m-33 1h1m5 0h1m4 0h1m2 0h5m2 0h5m4 0h1m-31 1h7m1 0h2m2 0h3m1 0h1m1 0h1m1 0h4m1 0h1m1 0h1m1 0h1m1 0h1\"/></svg>\n", "WJ-B2": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 37 37\" class=\"segno\"><path class=\"qrline\" stroke=\"#16365f\" d=\"M2 2.5h7m1 0h1m2 0h4m2 0h2m1 0h1m3 0h1m1 0h7m-33 1h1m5 0h1m3 0h3m2 0h1m8 0h1m1 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m1 0h4m1 0h3m2 0h1m1 0h3m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h3m3 0h1m3 0h1m1 0h2m3 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h2m1 0h1m2 0h1m3 0h1m1 0h4m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h2m2 0h3m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-24 1h1m1 0h1m1 0h1m1 0h2m1 0h3m2 0h1m-24 1h1m1 0h1m3 0h2m1 0h1m1 0h1m2 0h1m2 0h1m2 0h1m1 0h1m4 0h1m2 0h1m1 0h1m-33 1h1m1 0h4m1 0h1m1 0h7m1 0h1m2 0h4m1 0h2m2 0h2m1 0h1m-32 1h2m2 0h3m1 0h4m3 0h1m2 0h1m2 0h2m1 0h1m1 0h2m1 0h1m-31 1h3m1 0h1m2 0h4m1 0h2m2 0h2m1 0h5m5 0h1m-29 1h1m3 0h2m1 0h3m1 0h2m1 0h1m1 0h1m1 0h1m1 0h4m3 0h1m1 0h3m-33 1h1m4 0h1m1 0h6m13 0h1m1 0h1m1 0h1m-31 1h1m2 0h1m2 0h3m1 0h6m2 0h2m1 0h2m2 0h2m1 0h1m3 0h1m-33 1h1m3 0h2m1 0h2m1 0h1m1 0h1m9 0h2m1 0h1m1 0h2m1 0h3m-32 1h1m2 0h1m1 0h1m2 0h5m1 0h2m1 0h2m2 0h1m2 0h2m2 0h1m1 0h2m-30 1h1m1 0h1m1 0h1m1 0h1m3 0h1m4 0h1m1 0h4m1 0h2m5 0h1m-33 1h8m3 0h1m1 0h2m1 0h4m2 0h2m3 0h1m3 0h2m-33 1h1m1 0h3m5 0h1m2 0h1m2 0h1m1 0h2m1 0h2m2 0h1m2 0h2m-30 1h1m1 0h1m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h1m1 0h2m-31 1h2m2 0h1m2 0h2m2 0h2m2 0h1m1 0h1m1 0h1m2 0h3m2 0h4m-32 1h2m1 0h2m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1m1 0h1m1 0h2m3 0h6m1 0h1m-30 1h1m4 0h1m2 0h2m2 0h2m2 0h2m6 0h2m1 0h1m-31 1h2m1 0h1m2 0h2m1 0h5m2 0h2m4 0h1m1 0h5m2 0h2m-25 1h4m3 0h4m1 0h1m1 0h3m3 0h2m2 0h1m-33 1h7m1 0h1m3 0h1m3 0h1m2 0h3m2 0h1m1 0h1m1 0h4m-32 1h1m5 0h1m2 0h2m1 0h3m2 0h1m1 0h1m4 0h1m3 0h2m-30 1h1m1 0h3m1 0h1m2 0h1m3 0h1m1 0h1m1 0h1m2 0h13m-33 1h1m1 0h3m1 0h1m2 0h2m2 0h2m2 0h1m5 0h1m3 0h2m1 0h3m-33 1h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m1 0h1m1 0h3m2 0h1m2 0h6m-33 1h1m5 0h1m2 0h2m2 0h1m4 0h1m5 0h2m1 0h4m-31 1h7m1 0h3m1 0h5m1 0h2m2 0h2m2 0h1m2 0h1m2 0h1\"/></svg>\n", "WJ-B3": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 37 37\" class=\"segno\"><path class=\"qrline\" stroke=\"#16365f\" d=\"M2 2.5h7m1 0h1m1 0h1m1 0h3m2 0h2m1 0h1m3 0h1m1 0h7m-33 1h1m5 0h1m3 0h1m1 0h1m2 0h1m8 0h1m1 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m1 0h4m1 0h3m2 0h1m1 0h3m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h2m4 0h1m3 0h1m1 0h2m3 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m3 0h1m1 0h1m2 0h1m3 0h1m1 0h4m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h3m1 0h1m1 0h2m2 0h2m2 0h3m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-22 1h1m1 0h1m1 0h2m1 0h3m2 0h1m-24 1h1m1 0h1m3 0h2m1 0h4m1 0h1m2 0h1m2 0h1m1 0h1m4 0h1m2 0h1m1 0h1m-33 1h5m3 0h2m1 0h1m1 0h3m1 0h1m2 0h4m1 0h2m2 0h2m1 0h1m-32 1h1m3 0h3m1 0h2m1 0h1m3 0h1m2 0h1m2 0h2m1 0h1m1 0h2m1 0h1m-31 1h3m1 0h1m4 0h2m2 0h1m2 0h2m1 0h5m5 0h1m-29 1h2m2 0h2m1 0h6m1 0h1m1 0h1m1 0h1m1 0h4m3 0h1m1 0h3m-28 1h1m1 0h2m1 0h4m12 0h1m1 0h1m1 0h1m-30 1h1m1 0h6m1 0h3m2 0h1m2 0h2m1 0h2m2 0h2m1 0h1m3 0h1m-26 1h3m2 0h3m7 0h2m1 0h1m1 0h2m1 0h3m-32 1h1m2 0h1m1 0h1m1 0h5m2 0h2m1 0h2m2 0h1m2 0h2m2 0h1m1 0h2m-32 1h2m4 0h3m2 0h3m3 0h1m1 0h4m1 0h2m5 0h1m-33 1h2m2 0h5m2 0h1m1 0h2m1 0h4m2 0h2m3 0h1m3 0h2m-33 1h1m2 0h2m5 0h1m1 0h2m2 0h1m1 0h2m1 0h2m2 0h1m2 0h2m-30 1h1m1 0h1m1 0h1m1 0h1m1 0h1m5 0h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h1m1 0h2m-31 1h2m1 0h2m2 0h1m3 0h1m3 0h1m1 0h1m1 0h1m2 0h3m2 0h4m-32 1h2m1 0h4m1 0h1m1 0h2m1 0h2m1 0h1m1 0h1m1 0h2m3 0h6m1 0h1m-30 1h3m2 0h1m2 0h3m1 0h2m1 0h3m6 0h2m1 0h1m-31 1h2m1 0h2m1 0h2m1 0h1m1 0h1m2 0h1m1 0h2m4 0h1m1 0h5m2 0h2m-25 1h2m2 0h1m2 0h4m1 0h1m1 0h3m3 0h2m2 0h1m-33 1h7m1 0h1m2 0h2m3 0h1m2 0h3m2 0h1m1 0h1m1 0h4m-32 1h1m5 0h1m2 0h2m1 0h3m2 0h1m1 0h1m4 0h1m3 0h2m-30 1h1m1 0h3m1 0h1m2 0h1m1 0h1m1 0h1m1 0h1m1 0h1m2 0h13m-33 1h1m1 0h3m1 0h1m3 0h1m3 0h1m2 0h1m5 0h1m3 0h2m1 0h3m-33 1h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m1 0h1m1 0h3m2 0h1m2 0h6m-33 1h1m5 0h1m2 0h1m3 0h1m4 0h1m5 0h2m1 0h4m-31 1h7m1 0h1m4 0h4m1 0h2m2 0h2m2 0h1m2 0h1m2 0h1\"/></svg>\n", "WJ-C1": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 37 37\" class=\"segno\"><path class=\"qrline\" stroke=\"#16365f\" d=\"M2 2.5h7m1 0h1m1 0h3m3 0h1m1 0h2m2 0h3m1 0h7m-33 1h1m5 0h1m1 0h1m1 0h1m1 0h1m1 0h2m1 0h1m2 0h1m2 0h2m1 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m2 0h2m2 0h2m1 0h1m1 0h1m2 0h2m3 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m5 0h2m2 0h1m1 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h1m3 0h1m2 0h1m1 0h1m4 0h1m2 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m3 0h1m1 0h5m1 0h1m4 0h2m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-25 1h3m2 0h7m-20 1h1m1 0h2m1 0h3m1 0h2m4 0h1m2 0h1m2 0h4m1 0h1m2 0h1m1 0h2m-31 1h1m1 0h1m2 0h2m1 0h1m1 0h3m2 0h2m1 0h1m1 0h6m1 0h1m2 0h1m-33 1h1m1 0h5m5 0h2m1 0h1m2 0h1m2 0h1m1 0h2m6 0h1m-32 1h1m2 0h1m3 0h3m7 0h1m2 0h2m1 0h1m1 0h1m2 0h2m1 0h1m-30 1h1m1 0h1m1 0h2m1 0h1m2 0h1m1 0h3m3 0h2m2 0h3m2 0h2m-29 1h1m1 0h1m2 0h1m1 0h2m1 0h3m2 0h1m2 0h1m2 0h1m4 0h3m1 0h1m-31 1h1m1 0h1m1 0h2m2 0h1m2 0h1m3 0h1m1 0h2m1 0h4m1 0h4m-31 1h2m1 0h3m1 0h2m4 0h1m1 0h1m5 0h5m2 0h1m2 0h2m-32 1h1m2 0h4m3 0h2m1 0h1m6 0h1m2 0h1m1 0h5m1 0h1m-32 1h2m1 0h2m2 0h2m1 0h2m3 0h1m1 0h4m1 0h1m2 0h1m1 0h1m2 0h2m-33 1h1m5 0h1m3 0h3m5 0h1m1 0h1m4 0h5m-30 1h1m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h8m1 0h2m1 0h1m3 0h1m-31 1h6m1 0h1m1 0h2m2 0h2m4 0h3m1 0h5m1 0h2m-33 1h4m1 0h1m2 0h2m5 0h2m3 0h2m1 0h1m1 0h1m1 0h3m1 0h1m-27 1h4m1 0h6m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1m2 0h1m1 0h2m-32 1h1m1 0h1m1 0h1m1 0h3m1 0h2m1 0h2m2 0h1m1 0h1m1 0h1m2 0h1m1 0h1m2 0h2m-32 1h1m1 0h1m2 0h2m1 0h1m3 0h1m6 0h2m2 0h7m-22 1h2m1 0h1m2 0h3m1 0h1m3 0h1m1 0h1m3 0h1m-29 1h7m1 0h2m1 0h1m2 0h6m3 0h2m1 0h1m1 0h1m2 0h2m-33 1h1m5 0h1m1 0h1m1 0h1m2 0h3m1 0h3m1 0h1m2 0h1m3 0h3m-31 1h1m1 0h3m1 0h1m3 0h3m3 0h5m2 0h7m2 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m4 0h2m1 0h2m1 0h1m2 0h2m1 0h1m1 0h1m2 0h1m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h2m4 0h7m2 0h1m-31 1h1m5 0h1m3 0h2m2 0h1m2 0h2m1 0h1m2 0h6m1 0h1m1 0h1m-33 1h7m1 0h2m1 0h2m1 0h1m1 0h2m1 0h4m1 0h1m2 0h1m2 0h1\"/></svg>\n", "WJ-C2": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 37 37\" class=\"segno\"><path class=\"qrline\" stroke=\"#16365f\" d=\"M2 2.5h7m5 0h3m2 0h2m1 0h1m3 0h1m1 0h7m-33 1h1m5 0h1m1 0h1m1 0h2m3 0h1m2 0h1m7 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h2m3 0h1m4 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h3m1 0h4m2 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h1m1 0h7m2 0h2m2 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m2 0h2m3 0h2m3 0h1m2 0h2m2 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-25 1h1m1 0h4m1 0h2m2 0h2m2 0h2m-25 1h1m5 0h1m1 0h2m2 0h2m2 0h1m2 0h1m3 0h1m1 0h2m2 0h3m-30 1h1m2 0h1m1 0h1m1 0h1m1 0h3m1 0h4m2 0h1m1 0h3m2 0h2m-26 1h1m1 0h4m3 0h2m2 0h1m2 0h1m5 0h2m1 0h4m-32 1h1m1 0h2m2 0h4m2 0h1m2 0h9m4 0h2m-30 1h2m2 0h9m1 0h1m1 0h1m1 0h1m1 0h4m3 0h1m1 0h3m-33 1h1m4 0h1m1 0h2m1 0h2m1 0h1m4 0h1m5 0h1m1 0h1m1 0h1m-28 1h3m2 0h1m5 0h1m2 0h4m1 0h2m1 0h1m5 0h1m1 0h1m-32 1h3m1 0h2m1 0h1m1 0h1m3 0h1m2 0h1m3 0h1m2 0h5m3 0h1m-30 1h2m2 0h2m1 0h2m1 0h1m2 0h1m1 0h2m1 0h1m2 0h1m4 0h1m-29 1h1m8 0h1m1 0h1m1 0h1m6 0h7m3 0h1m1 0h1m-33 1h3m1 0h3m6 0h2m1 0h4m2 0h2m3 0h1m3 0h2m-30 1h2m2 0h1m2 0h4m2 0h1m2 0h1m1 0h2m1 0h2m2 0h3m-31 1h3m2 0h2m3 0h2m1 0h1m4 0h2m3 0h2m1 0h1m2 0h2m1 0h1m-33 1h2m2 0h2m4 0h1m2 0h2m7 0h2m1 0h2m2 0h1m1 0h2m-33 1h1m1 0h6m2 0h1m3 0h1m2 0h3m1 0h3m3 0h1m2 0h2m-32 1h1m2 0h2m3 0h2m1 0h1m2 0h3m1 0h3m3 0h1m2 0h2m-29 1h2m1 0h1m2 0h7m3 0h2m4 0h1m1 0h5m2 0h2m-25 1h2m4 0h4m2 0h1m1 0h3m3 0h3m1 0h1m-33 1h7m3 0h1m1 0h3m2 0h1m3 0h4m1 0h1m1 0h1m1 0h1m1 0h1m-33 1h1m5 0h1m2 0h1m3 0h1m2 0h5m1 0h1m1 0h1m3 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h3m2 0h3m2 0h1m1 0h1m2 0h5m1 0h1m-31 1h1m1 0h3m1 0h1m2 0h2m1 0h3m2 0h2m4 0h2m2 0h2m2 0h2m-33 1h1m1 0h3m1 0h1m2 0h2m1 0h1m1 0h2m1 0h1m1 0h3m2 0h1m2 0h6m-33 1h1m5 0h1m3 0h1m1 0h3m10 0h1m1 0h3m-30 1h7m1 0h2m1 0h1m3 0h1m1 0h2m1 0h1m4 0h1m2 0h1m2 0h1\"/></svg>\n", "WJ-C3": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 37 37\" class=\"segno\"><path class=\"qrline\" stroke=\"#16365f\" d=\"M2 2.5h7m1 0h1m1 0h5m2 0h2m1 0h1m3 0h1m1 0h7m-33 1h1m5 0h1m3 0h1m1 0h1m2 0h1m8 0h1m1 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m1 0h4m1 0h3m2 0h1m1 0h3m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h2m4 0h1m3 0h1m1 0h2m3 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m3 0h1m1 0h1m2 0h1m3 0h1m1 0h4m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h2m2 0h3m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-24 1h3m1 0h1m1 0h2m1 0h3m2 0h1m-24 1h1m1 0h1m3 0h2m1 0h1m1 0h1m2 0h1m2 0h1m2 0h1m1 0h1m4 0h1m2 0h1m1 0h1m-33 1h2m2 0h1m4 0h1m1 0h5m1 0h1m2 0h4m1 0h2m2 0h2m1 0h1m-32 1h1m3 0h2m2 0h2m5 0h1m2 0h1m2 0h2m1 0h1m1 0h2m1 0h1m-31 1h2m1 0h2m4 0h2m2 0h1m2 0h2m1 0h5m5 0h1m-29 1h1m3 0h6m1 0h2m1 0h1m1 0h1m1 0h1m1 0h4m3 0h1m1 0h3m-33 1h1m4 0h1m1 0h6m13 0h1m1 0h1m1 0h1m-31 1h2m1 0h1m2 0h3m1 0h3m2 0h1m2 0h2m1 0h2m2 0h2m1 0h1m3 0h1m-33 1h2m2 0h1m2 0h2m3 0h1m5 0h1m3 0h2m1 0h1m1 0h2m1 0h3m-32 1h1m1 0h4m2 0h1m1 0h2m1 0h3m1 0h2m2 0h1m2 0h2m2 0h1m1 0h2m-32 1h3m1 0h1m2 0h2m1 0h1m1 0h2m3 0h1m1 0h4m1 0h2m5 0h1m-33 1h2m1 0h4m1 0h1m4 0h2m1 0h4m2 0h2m3 0h1m3 0h2m-33 1h1m1 0h3m2 0h1m2 0h4m2 0h1m1 0h2m1 0h2m2 0h1m2 0h2m-30 1h1m3 0h1m1 0h3m2 0h1m2 0h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h1m1 0h2m-31 1h2m1 0h2m2 0h2m2 0h1m3 0h1m1 0h1m1 0h1m2 0h3m2 0h4m-32 1h2m1 0h1m1 0h2m1 0h4m4 0h1m1 0h1m1 0h2m3 0h6m1 0h1m-30 1h1m1 0h1m2 0h2m1 0h6m1 0h3m6 0h2m1 0h1m-31 1h2m1 0h2m1 0h4m1 0h1m1 0h2m1 0h2m4 0h1m1 0h5m2 0h2m-25 1h4m2 0h5m1 0h1m1 0h3m3 0h2m2 0h1m-33 1h7m1 0h1m3 0h1m3 0h1m2 0h3m2 0h1m1 0h1m1 0h4m-32 1h1m5 0h1m2 0h2m1 0h3m2 0h1m1 0h1m4 0h1m3 0h2m-30 1h1m1 0h3m1 0h1m2 0h1m1 0h1m1 0h1m1 0h1m1 0h1m2 0h13m-33 1h1m1 0h3m1 0h1m3 0h1m3 0h1m2 0h1m5 0h1m3 0h2m1 0h3m-33 1h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h3m2 0h1m2 0h6m-33 1h1m5 0h1m6 0h2m3 0h1m5 0h2m1 0h4m-31 1h7m1 0h1m3 0h5m1 0h2m2 0h2m2 0h1m2 0h1m2 0h1\"/></svg>\n"};
+  const $ = id => document.getElementById(id);
+
+  function render(){
+    const code = "WJ-" + $("blk").value + $("rnd").value;
+    $("code-front").textContent = code;
+    $("code-back").textContent = code;
+    $("nowcode").textContent = code;
+    $("qrbox").innerHTML = QR[code] || "";
+    $("dong-out").textContent = $("dong").value.trim() || " ";
+    document.title = "CARPRO WASH 전단 " + code;
+  }
+
+  ["blk","rnd"].forEach(id => $(id).addEventListener("change", render));
+  $("dong").addEventListener("input", render);
+  $("print").addEventListener("click", () => window.print());
+  render();
+</script>
