@@ -1,0 +1,6 @@
+# Rendered deliverables are large and fully reproducible from the score.
+build/
+*.wav
+*.mp3
+*.mp4
+.pytest_cache/

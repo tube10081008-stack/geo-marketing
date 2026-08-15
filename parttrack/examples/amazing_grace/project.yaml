@@ -1,0 +1,41 @@
+# Public-domain validation project.
+#
+# Everything here is safe to publish: the NEW BRITAIN tune (1835) and the
+# four-part setting in build_source.py are both public domain. Use this project
+# to prove the pipeline before pointing it at anything licensed.
+
+title: "Amazing Grace"
+work: "찬송가 / 합창 연습"
+composer: "전통 찬송가 (NEW BRITAIN, 1835) · 4성부 편곡 자체 제작"
+key: "G Major"
+rights: public-domain
+channel_name: ""
+
+source: amazing_grace.mid
+out_dir: build
+
+parts:
+  - { id: soprano, name: "소프라노", track: 1 }
+  - { id: alto,    name: "알토",     track: 2 }
+  - { id: tenor,   name: "테너",     track: 3 }
+  - { id: bass,    name: "베이스",   track: 4 }
+
+render:
+  lead_program: 52        # Choir Aahs — sustains, so long notes stay pitch-readable
+  backing_program: 0      # Piano under the lead for harmonic context
+  lead_velocity: 112
+  backing_velocity: 58
+  backing_volume: 46
+  count_in_bars: 1
+
+video:
+  width: 1280
+  height: 720
+  fps: 30
+  px_per_second: 110
+
+outputs:
+  variants: [per_part, part_only, full]
+  tempo_variants:
+    "": 1.0
+  audio_format: mp3
