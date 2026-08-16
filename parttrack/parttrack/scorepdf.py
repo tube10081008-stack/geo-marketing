@@ -125,11 +125,12 @@ def label_vocal_staves(page, staves: list[Staff]) -> list[Staff]:
         ]
         staff.lyrics = "".join(c["text"] for c in sorted(below, key=lambda c: c["x0"]))
         # Chord symbols sit under piano staves and look superficially like text
-        # ("Gm7", "Ab/Bb", "Eadd9"), so a bare character count picks up the wrong
-        # staves. Sung text is the only thing down there with real lower-case
-        # words in it.
-        lower = sum(1 for ch in staff.lyrics if ch.islower() and ch.isascii())
-        staff.is_vocal = len(below) > 6 and lower >= 6
+        # ("Gm7", "Ab/Bb", "Eadd9", "Cadd9"), so neither a character count nor a
+        # lower-case count separates them — a row of chord symbols carries
+        # plenty of 'm', 'a', 'd'. What it does not carry is variety: sung text
+        # uses most of the alphabet, chord suffixes use a handful of letters.
+        distinct = {ch for ch in staff.lyrics if ch.islower() and ch.isascii()}
+        staff.is_vocal = len(below) > 6 and len(distinct) >= 6
     return staves
 
 
@@ -343,6 +344,78 @@ def extract_notes(
 
     notes.sort(key=lambda n: n.x)
     return notes
+
+
+def clef_glyph(page, staff: Staff) -> int | None:
+    """CID of the clef: the leftmost music glyph sitting on the staff."""
+    candidates = [
+        char
+        for char in page.chars
+        if "Maestro" in char["fontname"]
+        and staff.x0 - 6 < char["x0"] < staff.x0 + 16
+        and staff.contains((char["y0"] + char["y1"]) / 2, ledger=4)
+    ]
+    if not candidates:
+        return None
+    return glyph_cid(min(candidates, key=lambda c: c["x0"]))
+
+
+def clef_census(page, staves: list[Staff]) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    for staff in staves:
+        cid = clef_glyph(page, staff)
+        if cid is not None:
+            counts[cid] = counts.get(cid, 0) + 1
+    return counts
+
+
+def detect_octave_shift(page, staff: Staff, plain_treble_cid: int | None = None) -> int:
+    """Spot the octave-down treble clef used for tenor lines.
+
+    Choral scores write tenors on a treble staff with a small 8 hung under it.
+    The 8 is not a separate character — Finale ships the whole thing as its own
+    clef glyph — so it is identified by having a different CID from the ordinary
+    treble clef that the rest of the page uses. Missing it puts the part an
+    octave too high, which is the difference between a line a tenor can sing and
+    one they cannot.
+    """
+    cid = clef_glyph(page, staff)
+    if cid is None or plain_treble_cid is None:
+        return 0
+    return -1 if cid != plain_treble_cid else 0
+
+
+def split_voices(
+    notes: list[NoteGlyph], x_tolerance: float = 2.0
+) -> list[list[NoteGlyph]]:
+    """Separate a staff carrying two parts into an upper and a lower line.
+
+    Choral writing puts two voices on one staff as stacked noteheads sharing a
+    stem, so soprano and alto (or tenor and bass) arrive interleaved. Notes that
+    sit at the same horizontal position are one chord; the highest belongs to
+    the upper part, the lowest to the lower one. Where only a single note is
+    written, both parts are in unison and it belongs to both.
+    """
+    if not notes:
+        return [[], []]
+
+    chords: list[list[NoteGlyph]] = []
+    current: list[NoteGlyph] = [notes[0]]
+    for note in notes[1:]:
+        if abs(note.x - current[0].x) <= x_tolerance:
+            current.append(note)
+        else:
+            chords.append(current)
+            current = [note]
+    chords.append(current)
+
+    upper: list[NoteGlyph] = []
+    lower: list[NoteGlyph] = []
+    for chord in chords:
+        chord.sort(key=lambda n: n.pitch)
+        upper.append(chord[-1])
+        lower.append(chord[0])
+    return [upper, lower]
 
 
 def read_staff(
