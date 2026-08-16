@@ -14,7 +14,7 @@ from .config import ProjectConfig
 from .metadata import build_metadata, write_metadata
 from .mixdown import MixSpec, count_in_seconds, plan_mixes, resolve_levels, write_mix
 from .pianoroll import PianoRollRenderer
-from .rehearsal import build_kit
+from .rehearsal import build_kit, overlay_bed
 from .score import Score, describe, load_score
 
 
@@ -71,11 +71,29 @@ def _build_one(
         gain=project.render.gain,
     )
 
+    count_in_s = count_in_seconds(project, score, spec)
+
+    # With a recording attached, the deliverable is the synth part over the
+    # performance rather than the synth part alone.
+    if project.recording is not None and project.render.bed_enabled:
+        source = project.recording.source
+        if not source.is_absolute():
+            source = project.root / source
+        blended = wav_path.with_name(f"{wav_path.stem}.blend.wav")
+        overlay_bed(
+            wav_path,
+            source,
+            blended,
+            offset=count_in_s - project.recording.anchors[0].at,
+            bed_gain_db=project.render.bed_gain_db,
+        )
+        wav_path.unlink(missing_ok=True)
+        blended.rename(wav_path)
+
     audio_format = project.outputs.audio_format
     audio_path = out_dir / "audio" / f"{spec.slug}.{audio_format}"
     encode(wav_path, audio_path, audio_format)
 
-    count_in_s = count_in_seconds(project, score, spec)
     metadata = build_metadata(project, score, spec, count_in_s)
     metadata_path = write_metadata(
         metadata, out_dir / "metadata" / f"{spec.slug}.json"

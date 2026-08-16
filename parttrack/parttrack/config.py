@@ -155,6 +155,10 @@ class RenderConfig:
     pan_spread: int = 26
     sample_rate: int = 44100
     gain: float = 0.7
+    # When the project also carries a recording, the performance is mixed in
+    # underneath the synthesised part at this level.
+    bed_enabled: bool = True
+    bed_gain_db: float = -15.0
 
     def __post_init__(self) -> None:
         if not 0 <= self.lead_program <= 127:

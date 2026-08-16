@@ -60,6 +60,11 @@ def effective_tempo_map(
     project: ProjectConfig, score: Score, tempo_scale: float = 1.0
 ) -> TempoMap:
     """Combine the score's own tempo map with the variant and section scales."""
+    # When the project carries a recording, the recording's clock wins: the
+    # synthesised part exists to play along with it.
+    if project.recording is not None and project.recording.anchors:
+        return anchor_tempo_map(project, score, tempo_scale)
+
     base = score.tempo_map
     global_scale = tempo_scale
 
@@ -84,6 +89,37 @@ def effective_tempo_map(
             continue
         collapsed.append((tick, tempo))
     return TempoMap(score.ticks_per_beat, collapsed)
+
+
+def anchor_tempo_map(
+    project: ProjectConfig, score: Score, tempo_scale: float = 1.0
+) -> TempoMap:
+    """Derive a tempo map that makes the score land on the recording's clock.
+
+    The point of the overlay format is that a synthesised part plays *with* the
+    actual recording, so the score cannot run on its own written tempo — it has
+    to follow whatever the performance did. Each anchor span becomes one tempo
+    region sized so its bars occupy exactly the seconds the recording gives them.
+    """
+    recording = project.recording
+    if recording is None:
+        raise ValueError("project has no `recording:` block to take anchors from")
+
+    beats_per_bar = max(1.0, score.ticks_per_bar / score.ticks_per_beat)
+    changes: list[tuple[int, int]] = []
+    for first, second in zip(recording.anchors, recording.anchors[1:]):
+        span_bars = second.bar - first.bar
+        span_seconds = second.at - first.at
+        if span_bars <= 0 or span_seconds <= 0:
+            continue
+        seconds_per_beat = span_seconds / (span_bars * beats_per_bar) / tempo_scale
+        changes.append((bar_tick(score, first.bar), int(round(seconds_per_beat * 1e6))))
+
+    if not changes:
+        raise ValueError("anchors do not describe a usable span")
+    if changes[0][0] != 0:
+        changes.insert(0, (0, changes[0][1]))
+    return TempoMap(score.ticks_per_beat, changes)
 
 
 def count_in_ticks(project: ProjectConfig, score: Score) -> int:

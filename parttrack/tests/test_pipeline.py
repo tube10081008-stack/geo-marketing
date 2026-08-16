@@ -32,6 +32,7 @@ from parttrack.mixdown import (  # noqa: E402
 )
 from parttrack.score import load_score  # noqa: E402
 from parttrack.timing import (  # noqa: E402
+    anchor_tempo_map,
     bar_tick,
     effective_tempo_map,
     marker_points,
@@ -658,6 +659,40 @@ def test_atempo_chain_stays_within_ffmpeg_limits(tmp_path: Path) -> None:
         for value in chain:
             product *= value
         assert product == pytest.approx(factor, rel=1e-4)
+
+
+def test_anchor_tempo_map_lands_bars_on_the_recording(tmp_path: Path) -> None:
+    """The synth part must follow the performance, not the written tempo."""
+    project = _project(tmp_path, bars=48, recording=RECORDING)
+    score = load_score(project)
+    tempo_map = anchor_tempo_map(project, score)
+
+    for anchor in project.recording.anchors:
+        landed = tempo_map.tick_to_second(bar_tick(score, anchor.bar))
+        assert landed == pytest.approx(anchor.at, abs=0.01), anchor.bar
+
+
+def test_anchor_map_overrides_the_scores_own_tempo(tmp_path: Path) -> None:
+    with_recording = _project(tmp_path / "a", bars=48, recording=RECORDING)
+    without = _project(tmp_path / "b", bars=48)
+
+    score_a, score_b = load_score(with_recording), load_score(without)
+    at_bar_25_a = effective_tempo_map(with_recording, score_a).tick_to_second(
+        bar_tick(score_a, 25)
+    )
+    at_bar_25_b = effective_tempo_map(without, score_b).tick_to_second(
+        bar_tick(score_b, 25)
+    )
+    # The recording puts bar 25 at 40s; the written 120 BPM 4/4 puts it at 48s.
+    assert at_bar_25_a == pytest.approx(40.0, abs=0.01)
+    assert at_bar_25_b == pytest.approx(48.0, abs=0.01)
+
+
+def test_anchor_tempo_scales_with_the_variant(tmp_path: Path) -> None:
+    project = _project(tmp_path, bars=48, recording=RECORDING)
+    score = load_score(project)
+    slow = anchor_tempo_map(project, score, tempo_scale=0.5)
+    assert slow.tick_to_second(bar_tick(score, 25)) == pytest.approx(80.0, abs=0.02)
 
 
 def test_section_slug_is_filesystem_safe(tmp_path: Path) -> None:

@@ -364,6 +364,54 @@ def emphasise_center(source: Path, destination: Path) -> Path:
     return destination
 
 
+def overlay_bed(
+    part_audio: Path,
+    recording: Path,
+    destination: Path,
+    offset: float,
+    bed_gain_db: float,
+) -> Path:
+    """Lay the synthesised part over the actual recording.
+
+    This is the format the practice videos in this niche actually use: the real
+    performance sits underneath at a low level so the singer hears the number as
+    it goes, and a clean synth rendering of their own line sits on top so the
+    pitches are never in doubt. Nothing is separated — the part is added.
+
+    `offset` is where bar 1 of the score falls in the output, so a positive
+    value delays the recording and a negative one trims into it.
+    """
+    require("ffmpeg")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    inputs = ["-i", str(part_audio)]
+    if offset < 0:
+        inputs += ["-ss", f"{-offset:.3f}", "-i", str(recording)]
+        bed_chain = f"[1:a]volume={bed_gain_db}dB[bed]"
+    else:
+        milliseconds = int(round(offset * 1000))
+        inputs += ["-i", str(recording)]
+        bed_chain = (
+            f"[1:a]adelay={milliseconds}|{milliseconds},volume={bed_gain_db}dB[bed]"
+        )
+
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            *inputs,
+            "-filter_complex",
+            f"{bed_chain};[0:a][bed]amix=inputs=2:duration=longest:normalize=0[out]",
+            "-map",
+            "[out]",
+            str(destination),
+        ]
+    )
+    return destination
+
+
 def section_slug(section: SectionConfig) -> str:
     """ASCII filename stem — section names are usually Korean."""
     ascii_name = "".join(
