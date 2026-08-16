@@ -124,7 +124,12 @@ def label_vocal_staves(page, staves: list[Staff]) -> list[Staff]:
             and staff.x0 - 5 < char["x0"] < staff.x1
         ]
         staff.lyrics = "".join(c["text"] for c in sorted(below, key=lambda c: c["x0"]))
-        staff.is_vocal = len(below) > 6
+        # Chord symbols sit under piano staves and look superficially like text
+        # ("Gm7", "Ab/Bb", "Eadd9"), so a bare character count picks up the wrong
+        # staves. Sung text is the only thing down there with real lower-case
+        # words in it.
+        lower = sum(1 for ch in staff.lyrics if ch.islower() and ch.isascii())
+        staff.is_vocal = len(below) > 6 and lower >= 6
     return staves
 
 
@@ -188,6 +193,52 @@ def _key_signature(key: str) -> tuple[list[str], list[str], dict[str, int]]:
     if key in sharps:
         return SHARP_ORDER[: sharps[key]], SHARP_ORDER, TREBLE_SHARP_STEPS
     return [], FLAT_ORDER, TREBLE_FLAT_STEPS
+
+
+FLAT_KEYS = ["C", "F", "Bb", "Eb", "Ab", "Db", "Gb"]
+SHARP_KEYS = ["C", "G", "D", "A", "E", "B", "F#"]
+
+
+def detect_key(page, staff: Staff, accidental_width: float = 3.6) -> str:
+    """Read the key off the signature itself, so a modulation cannot be missed.
+
+    The accidentals are the run of identical narrow glyphs sitting between the
+    clef and the first note. Counting them gives the key; whether they climb or
+    fall across the run tells flats from sharps (flats descend by a fourth then
+    rise by a fifth, sharps do the reverse), but the reliable discriminator here
+    is simply that a flat sits lower than the note it alters.
+    """
+    head = [
+        char
+        for char in page.chars
+        if "Maestro" in char["fontname"]
+        and staff.contains((char["y0"] + char["y1"]) / 2)
+        and staff.x0 - 2 < char["x0"] < staff.x0 + 60
+        and (char["x1"] - char["x0"]) < accidental_width
+    ]
+    if not head:
+        return "C"
+
+    by_cid: dict[int, list[dict]] = {}
+    for char in head:
+        by_cid.setdefault(glyph_cid(char), []).append(char)
+    cid, run = max(by_cid.items(), key=lambda kv: len(kv[1]))
+    run.sort(key=lambda c: c["x0"])
+    count = min(len(run), 6)
+
+    # Try the flat reading first: the flats' known positions must line up on a
+    # single offset. If they do not, read it as sharps.
+    for keys, table, order in (
+        (FLAT_KEYS, TREBLE_FLAT_STEPS, FLAT_ORDER),
+        (SHARP_KEYS, TREBLE_SHARP_STEPS, SHARP_ORDER),
+    ):
+        offsets = [
+            table[letter] - _raw_step(char, staff)
+            for char, letter in zip(run[:count], order[:count])
+        ]
+        if max(offsets) - min(offsets) < CALIBRATION_TOLERANCE:
+            return keys[count]
+    return "C"
 
 
 def detect_notehead_cids(page, staves: list[Staff], limit: int = 2) -> set[int]:
