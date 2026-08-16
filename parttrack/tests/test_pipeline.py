@@ -31,6 +31,13 @@ from parttrack.mixdown import (  # noqa: E402
     resolve_levels,
 )
 from parttrack.score import load_score  # noqa: E402
+from parttrack.scorepdf import (  # noqa: E402
+    CalibrationError,
+    Staff,
+    _key_signature,
+    calibrate,
+    step_to_pitch,
+)
 from parttrack.timing import (  # noqa: E402
     anchor_tempo_map,
     bar_tick,
@@ -704,3 +711,49 @@ def test_section_slug_is_filesystem_safe(tmp_path: Path) -> None:
     assert section_slug(korean_section) == "bars-33-40"
     for slug in (section_slug(ascii_section), section_slug(korean_section)):
         assert slug.isascii() and "/" not in slug and " " not in slug
+
+
+# --- 벡터 악보 PDF 판독 --------------------------------------------------
+
+
+def test_step_to_pitch_treble() -> None:
+    # 높은음자리표 밑줄 = E4, 반칸씩 올라간다.
+    assert step_to_pitch(0, "treble") == (64, "E")
+    assert step_to_pitch(2, "treble") == (67, "G")   # 둘째 줄 G4
+    assert step_to_pitch(4, "treble") == (71, "B")   # 가운데 줄 B4
+    assert step_to_pitch(8, "treble") == (77, "F")   # 윗줄 F5
+    assert step_to_pitch(-3, "treble") == (59, "B")  # 아래 덧줄 B3
+
+
+def test_step_to_pitch_bass() -> None:
+    assert step_to_pitch(0, "bass") == (43, "G")     # 낮은음자리 밑줄 G2
+    assert step_to_pitch(8, "bass") == (57, "A")     # 윗줄 A3
+
+
+def test_key_signature_tables() -> None:
+    flats, _, table = _key_signature("Eb")
+    assert flats == ["B", "E", "A"]                  # E♭장조 = 플랫 3개
+    # 조표는 관례상 정해진 자리에 그린다 — 보정의 기준점이 된다.
+    assert (table["B"], table["E"], table["A"]) == (4, 7, 3)
+
+    sharps, _, sharp_table = _key_signature("D")
+    assert sharps == ["F", "C"]
+    assert sharp_table["F"] == 8
+
+    none, _, _ = _key_signature("C")
+    assert none == []
+
+
+def test_unkeyed_score_cannot_calibrate() -> None:
+    """조표가 없으면 기준점이 없어 보정이 불가능하다 — 조용히 틀리지 않게 한다."""
+    staff = Staff(lines=[10.0, 14.0, 18.0, 22.0, 26.0], space=4.0, x0=36.0, x1=576.0)
+    with pytest.raises(CalibrationError, match="no accidentals"):
+        calibrate(None, staff, "C")
+
+
+def test_staff_contains_allows_ledger_lines() -> None:
+    staff = Staff(lines=[10.0, 14.0, 18.0, 22.0, 26.0], space=4.0, x0=36.0, x1=576.0)
+    assert staff.contains(18.0)          # 오선 안
+    assert staff.contains(4.0)           # 아래 덧줄
+    assert staff.contains(32.0)          # 위 덧줄
+    assert not staff.contains(-40.0)     # 다른 단
