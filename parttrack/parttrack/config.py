@@ -29,9 +29,26 @@ FALLBACK_COLOR = "#868e96"
 # General MIDI programs. A sustained, voice-like timbre reads far better than a
 # piano for learning long choral notes, so the lead part defaults to Choir Aahs
 # while the supporting parts sit under it on a piano.
-DEFAULT_LEAD_PROGRAM = 52  # Choir Aahs
-DEFAULT_BACKING_PROGRAM = 0  # Acoustic Grand Piano
+# The lead patch must SUSTAIN. A singer holding a dotted half note needs the
+# pitch still sounding at the end of it; a decaying patch leaves them guessing
+# and turns the track into a series of plinks.
+#
+# Measured sustain ratio (level remaining 1.2s after attack, FluidR3_GM), against
+# a reference practice track that measures 0.67:
+#     GM  0 Acoustic Piano    0.11   <- decays; unusable as a lead
+#     GM 19 Church Organ      0.67   <- matches
+#     GM 52 Choir Aahs        0.66   <- matches
+#     GM 53 Voice Oohs        0.72
+#     GM 48 String Ensemble   0.89   <- never decays; muddies fast passages
+# Keep any override in the 0.6-0.8 band.
+DEFAULT_LEAD_PROGRAM = 52  # Choir Aahs — sustain 0.66
+DEFAULT_BACKING_PROGRAM = 0  # Acoustic Grand Piano — decay is fine underneath
 DEFAULT_REFERENCE_PROGRAM = 73  # Flute — cuts through without sounding like a part
+
+# Lead patches whose sustain ratio falls outside this band get a warning from
+# `parttrack doctor`, because the symptom in the output is unmistakable.
+LEAD_SUSTAIN_BAND = (0.55, 0.85)
+DECAYING_LEAD_PROGRAMS = frozenset({0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15, 24, 25, 26, 27, 45, 46, 47, 105, 106, 107, 108})
 
 VALID_VARIANTS = ("per_part", "part_only", "full")
 
@@ -167,6 +184,13 @@ class RenderConfig:
             raise ValueError("backing_program must be 0..127")
         if self.count_in_bars < 0:
             raise ValueError("count_in_bars must be >= 0")
+        if self.lead_program in DECAYING_LEAD_PROGRAMS:
+            raise ValueError(
+                f"lead_program {self.lead_program} is a decaying patch (piano, "
+                "guitar, mallet). Held notes fall silent before the singer is "
+                "done with them. Use a sustaining patch — 52 Choir Aahs, "
+                "19 Church Organ, 53 Voice Oohs — or set it as backing_program."
+            )
 
 
 @dataclass
