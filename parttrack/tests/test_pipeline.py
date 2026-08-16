@@ -10,7 +10,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from parttrack.config import ProjectConfig  # noqa: E402
+from parttrack.config import ProjectConfig, SectionConfig  # noqa: E402
+from parttrack.rehearsal import (  # noqa: E402
+    _atempo_chain,
+    bar_to_time,
+    local_seconds_per_bar,
+    section_slug,
+)
 from parttrack.metadata import build_metadata  # noqa: E402
 from parttrack.mixdown import (  # noqa: E402
     DRUM_CHANNEL,
@@ -551,3 +557,115 @@ def test_overlapping_sections_are_rejected(tmp_path: Path) -> None:
 def test_backwards_section_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="to_bar precedes from_bar"):
         _project(tmp_path, sections=[{"name": "A", "from_bar": 8, "to_bar": 4}])
+
+
+# --- rehearsal kit from a real recording -----------------------------------
+
+RECORDING = {
+    "source": "take.mp3",
+    "beats_per_bar": 2,
+    "anchors": [
+        {"bar": 1, "at": 0.0},
+        {"bar": 25, "at": 40.0},
+        {"bar": 49, "at": 76.0},
+    ],
+}
+
+
+def test_bar_to_time_interpolates_between_anchors(tmp_path: Path) -> None:
+    project = _project(tmp_path, recording=RECORDING)
+    recording = project.recording
+
+    assert bar_to_time(recording, 1) == pytest.approx(0.0)
+    assert bar_to_time(recording, 25) == pytest.approx(40.0)
+    assert bar_to_time(recording, 49) == pytest.approx(76.0)
+    # Halfway through the first span, in bars, is halfway through it in seconds.
+    assert bar_to_time(recording, 13) == pytest.approx(20.0)
+    # The second span runs at a different rate; interpolation follows it.
+    assert bar_to_time(recording, 37) == pytest.approx(58.0)
+
+
+def test_bar_to_time_extrapolates_past_the_ends(tmp_path: Path) -> None:
+    project = _project(tmp_path, recording=RECORDING)
+    recording = project.recording
+    # 1.5s per bar in the closing span carries past the last anchor.
+    assert bar_to_time(recording, 53) == pytest.approx(82.0)
+    assert bar_to_time(recording, -3) < 0.0
+
+
+def test_local_seconds_per_bar_tracks_the_span(tmp_path: Path) -> None:
+    project = _project(tmp_path, recording=RECORDING)
+    recording = project.recording
+    assert local_seconds_per_bar(recording, 5) == pytest.approx(40.0 / 24)
+    assert local_seconds_per_bar(recording, 30) == pytest.approx(36.0 / 24)
+
+
+def test_recording_needs_two_anchors(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="at least two anchors"):
+        _project(
+            tmp_path,
+            recording={"source": "take.mp3", "anchors": [{"bar": 1, "at": 0.0}]},
+        )
+
+
+def test_recording_anchor_times_must_increase(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="must increase"):
+        _project(
+            tmp_path,
+            recording={
+                "source": "take.mp3",
+                "anchors": [{"bar": 1, "at": 30.0}, {"bar": 9, "at": 10.0}],
+            },
+        )
+
+
+def test_recording_only_project_needs_no_parts(tmp_path: Path) -> None:
+    """A kit cut from audio alone never loads a score, so parts are optional."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    project = ProjectConfig.from_dict(
+        {
+            "title": "실황",
+            "recording": RECORDING,
+            "sections": [{"name": "후렴", "from_bar": 25, "to_bar": 48}],
+        },
+        root=tmp_path,
+    )
+    assert project.parts == []
+    assert project.recording is not None
+    assert len(project.sections) == 1
+
+
+def test_recording_only_project_still_checks_sections(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="overlap"):
+        ProjectConfig.from_dict(
+            {
+                "title": "실황",
+                "recording": RECORDING,
+                "sections": [
+                    {"name": "A", "from_bar": 1, "to_bar": 10},
+                    {"name": "B", "from_bar": 5, "to_bar": 20},
+                ],
+            },
+            root=tmp_path,
+        )
+
+
+def test_atempo_chain_stays_within_ffmpeg_limits(tmp_path: Path) -> None:
+    for factor in (0.9, 0.75, 0.5, 0.4, 0.25, 1.5):
+        chain = _atempo_chain(factor)
+        assert all(0.5 <= value <= 2.0 for value in chain), factor
+        product = 1.0
+        for value in chain:
+            product *= value
+        assert product == pytest.approx(factor, rel=1e-4)
+
+
+def test_section_slug_is_filesystem_safe(tmp_path: Path) -> None:
+    ascii_section = SectionConfig(name="Power Ballad", from_bar=25, to_bar=32)
+    korean_section = SectionConfig(name="앙상블 진입", from_bar=33, to_bar=40)
+
+    assert section_slug(ascii_section) == "power-ballad-25-32"
+    # Nothing usable survives from a Korean name, so bars identify the file.
+    assert section_slug(korean_section) == "bars-33-40"
+    for slug in (section_slug(ascii_section), section_slug(korean_section)):
+        assert slug.isascii() and "/" not in slug and " " not in slug

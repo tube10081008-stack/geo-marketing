@@ -1,5 +1,8 @@
 # Rendered deliverables are large and fully reproducible from the score.
 build/
+# Working projects that reference licensed or rented material never leave the
+# machine they were cut on. This repository is public.
+work/
 *.wav
 *.mp3
 *.mp4

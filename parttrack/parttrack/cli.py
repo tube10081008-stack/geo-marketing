@@ -14,6 +14,7 @@ from .config import ProjectConfig
 from .metadata import build_metadata, write_metadata
 from .mixdown import MixSpec, count_in_seconds, plan_mixes, resolve_levels, write_mix
 from .pianoroll import PianoRollRenderer
+from .rehearsal import build_kit
 from .score import Score, describe, load_score
 
 
@@ -179,6 +180,45 @@ def _write_index(project: ProjectConfig, out_dir: Path, records: list[dict]) -> 
     )
 
 
+def cmd_rehearse(args: argparse.Namespace) -> int:
+    project = ProjectConfig.load(args.project)
+    if args.out:
+        project.out_dir = Path(args.out)
+    if project.recording is None:
+        _log(f"{args.project} has no `recording:` block — nothing to cut.")
+        return 1
+
+    out_dir = project.output_path / "rehearsal"
+    _log(f"project  : {project.title}")
+    _log(f"recording: {project.recording.source}")
+    _log(f"output   : {out_dir}")
+
+    started = time.time()
+    records = build_kit(project, out_dir)
+    (out_dir / "index.json").write_text(
+        json.dumps(
+            {
+                "project": project.title,
+                "generator": f"parttrack {__version__}",
+                "source": str(project.recording.source),
+                "items": records,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    by_kind: dict[str, int] = {}
+    for record in records:
+        by_kind[record["kind"]] = by_kind.get(record["kind"], 0) + 1
+    for kind, count in sorted(by_kind.items()):
+        _log(f"  {kind:<14} {count}")
+    _log(f"\n{len(records)} files in {time.time() - started:.0f}s -> {out_dir}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="parttrack",
@@ -208,6 +248,14 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--dry-run", action="store_true", help="list deliverables and exit")
     build.add_argument("--fail-fast", action="store_true", help="stop at the first failure")
     build.set_defaults(func=cmd_build)
+
+    rehearse = subparsers.add_parser(
+        "rehearse",
+        help="cut an actual recording into section loops and slow practice takes",
+    )
+    rehearse.add_argument("project", help="path to a project YAML with a recording block")
+    rehearse.add_argument("--out", help="override the project's output directory")
+    rehearse.set_defaults(func=cmd_rehearse)
 
     return parser
 

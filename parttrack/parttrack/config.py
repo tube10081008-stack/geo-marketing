@@ -218,6 +218,67 @@ class OutputConfig:
 
 
 @dataclass
+class Anchor:
+    """A known correspondence between a score bar and a time in a recording."""
+
+    bar: int
+    at: float
+
+    def __post_init__(self) -> None:
+        if self.bar < 1:
+            raise ValueError("anchor bar is 1-indexed")
+        if self.at < 0:
+            raise ValueError("anchor time must be >= 0")
+
+
+@dataclass
+class RecordingConfig:
+    """How to cut an actual recording into rehearsal material.
+
+    Bars are mapped onto the recording with a handful of hand-placed anchors
+    rather than a single tempo, because theatre recordings do not hold one — a
+    colla voce verse and the section after it sit on different clocks.
+    """
+
+    source: Path
+    anchors: list[Anchor] = field(default_factory=list)
+    beats_per_bar: int = 4
+    tempo_variants: dict[str, float] = field(default_factory=lambda: {"느리게": 0.8})
+    loop_repeats: int = 3
+    loop_gap: float = 1.5
+    count_in_beats: int = 4
+    lead_in: float = 0.35
+    vocal_reduce: bool = True
+    vocal_focus: bool = False
+    audio_format: str = "mp3"
+
+    def __post_init__(self) -> None:
+        self.source = Path(self.source)
+        self.anchors = [
+            anchor if isinstance(anchor, Anchor) else Anchor(**anchor)
+            for anchor in self.anchors
+        ]
+        self.anchors.sort(key=lambda anchor: anchor.bar)
+        if len(self.anchors) < 2:
+            raise ValueError(
+                "recording needs at least two anchors to map bars onto time"
+            )
+        bars = [anchor.bar for anchor in self.anchors]
+        if len(set(bars)) != len(bars):
+            raise ValueError("duplicate anchor bar")
+        times = [anchor.at for anchor in self.anchors]
+        if times != sorted(times):
+            raise ValueError("anchor times must increase with bar number")
+        if self.beats_per_bar < 1:
+            raise ValueError("beats_per_bar must be >= 1")
+        for label, scale in self.tempo_variants.items():
+            if not 0.1 <= scale <= 2.0:
+                raise ValueError(f"tempo scale for {label!r} must be within 0.1..2.0")
+        if self.loop_repeats < 1:
+            raise ValueError("loop_repeats must be >= 1")
+
+
+@dataclass
 class ProjectConfig:
     """Everything needed to turn one score into a batch of practice videos."""
 
@@ -235,12 +296,18 @@ class ProjectConfig:
     render: RenderConfig = field(default_factory=RenderConfig)
     video: VideoConfig = field(default_factory=VideoConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)
+    recording: RecordingConfig | None = None
     out_dir: Path = Path("build")
     root: Path = Path(".")
 
     def __post_init__(self) -> None:
+        # A recording-only project drives `parttrack rehearse` from sections
+        # alone and never touches a score, so it needs no parts.
         if not self.parts:
-            raise ValueError("project must declare at least one part")
+            if self.recording is None:
+                raise ValueError("project must declare at least one part")
+            self._validate_sections()
+            return
         seen: set[str] = set()
         for part in self.parts:
             if part.id in seen:
@@ -252,6 +319,9 @@ class ProjectConfig:
                 "reference and accompaniment parts are never practice targets"
             )
 
+        self._validate_sections()
+
+    def _validate_sections(self) -> None:
         self.sections.sort(key=lambda section: section.from_bar)
         previous: SectionConfig | None = None
         for section in self.sections:
@@ -304,16 +374,19 @@ class ProjectConfig:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], root: Path = Path(".")) -> "ProjectConfig":
-        missing = [key for key in ("title", "source", "parts") if key not in raw]
+        # A recording-only project has no score to point at, so `source` and
+        # `parts` are required only when one is expected.
+        required = ["title"] if "recording" in raw else ["title", "source", "parts"]
+        missing = [key for key in required if key not in raw]
         if missing:
             raise ValueError(f"project file is missing required keys: {missing}")
 
-        parts = [PartConfig(**part) for part in raw["parts"]]
+        parts = [PartConfig(**part) for part in raw.get("parts", [])]
         sections = [SectionConfig(**section) for section in raw.get("sections", [])]
         markers = [MarkerConfig(**marker) for marker in raw.get("markers", [])]
         return cls(
             title=raw["title"],
-            source=Path(raw["source"]),
+            source=Path(raw.get("source", "")),
             work=raw.get("work", ""),
             composer=raw.get("composer", ""),
             key=raw.get("key", ""),
@@ -326,6 +399,9 @@ class ProjectConfig:
             render=RenderConfig(**raw.get("render", {})),
             video=VideoConfig(**raw.get("video", {})),
             outputs=OutputConfig(**raw.get("outputs", {})),
+            recording=(
+                RecordingConfig(**raw["recording"]) if "recording" in raw else None
+            ),
             out_dir=Path(raw.get("out_dir", "build")),
             root=root,
         )
