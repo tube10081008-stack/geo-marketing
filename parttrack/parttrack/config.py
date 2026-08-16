@@ -31,9 +31,15 @@ FALLBACK_COLOR = "#868e96"
 # while the supporting parts sit under it on a piano.
 DEFAULT_LEAD_PROGRAM = 52  # Choir Aahs
 DEFAULT_BACKING_PROGRAM = 0  # Acoustic Grand Piano
+DEFAULT_REFERENCE_PROGRAM = 73  # Flute — cuts through without sounding like a part
 
 VALID_VARIANTS = ("per_part", "part_only", "full")
-VALID_ROLES = ("voice", "accompaniment")
+
+# voice          — a part singers actually practise; gets its own deliverables.
+# reference      — a line that is always audible as a cue (a solo melody, a
+#                  conductor's guide) but that nobody uses this channel to learn.
+# accompaniment  — piano reduction or band track, harmonic context only.
+VALID_ROLES = ("voice", "reference", "accompaniment")
 
 
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:
@@ -71,6 +77,58 @@ class PartConfig:
     def is_voice(self) -> bool:
         return self.role == "voice"
 
+    @property
+    def is_reference(self) -> bool:
+        return self.role == "reference"
+
+
+@dataclass
+class SectionConfig:
+    """A named span of bars with its own timing behaviour.
+
+    Real theatre scores are not metronomic: colla voce passages follow the
+    singer and endings ritard. Declaring those spans lets the click stay out of
+    the way instead of fighting the score.
+    """
+
+    name: str
+    from_bar: int
+    to_bar: int
+    tempo_scale: float = 1.0
+    click: bool | None = None  # None inherits render.click_through
+    rubato: bool = False
+
+    def __post_init__(self) -> None:
+        if self.from_bar < 1:
+            raise ValueError(f"section {self.name!r}: from_bar is 1-indexed")
+        if self.to_bar < self.from_bar:
+            raise ValueError(f"section {self.name!r}: to_bar precedes from_bar")
+        if self.tempo_scale <= 0:
+            raise ValueError(f"section {self.name!r}: tempo_scale must be > 0")
+        if self.rubato and self.click is None:
+            # A conductor following the singer cannot also follow a click.
+            self.click = False
+
+    def contains_bar(self, bar: int) -> bool:
+        return self.from_bar <= bar <= self.to_bar
+
+
+@dataclass
+class MarkerConfig:
+    """A point of interest drawn on the roll — a modulation, a key entrance."""
+
+    bar: int
+    label: str
+    color: str = "#ffd43b"
+
+    def __post_init__(self) -> None:
+        if self.bar < 1:
+            raise ValueError(f"marker {self.label!r}: bar is 1-indexed")
+
+    @property
+    def rgb(self) -> tuple[int, int, int]:
+        return _hex_to_rgb(self.color)
+
 
 @dataclass
 class RenderConfig:
@@ -78,11 +136,17 @@ class RenderConfig:
 
     lead_program: int = DEFAULT_LEAD_PROGRAM
     backing_program: int = DEFAULT_BACKING_PROGRAM
+    reference_program: int = DEFAULT_REFERENCE_PROGRAM
     lead_velocity: int = 112
     backing_velocity: int = 58
+    reference_velocity: int = 82
     lead_volume: int = 127
     backing_volume: int = 46
+    reference_volume: int = 78
     count_in_bars: int = 1
+    # A click that runs under the whole take, not just the count-in. Off by
+    # default because it fights rubato; sections can override it either way.
+    click_through: bool = False
     click_note: int = 76  # GM "Hi Wood Block"
     click_accent_note: int = 77
     click_velocity: int = 92
@@ -166,6 +230,8 @@ class ProjectConfig:
     rights_note: str = ""
     channel_name: str = ""
     parts: list[PartConfig] = field(default_factory=list)
+    sections: list[SectionConfig] = field(default_factory=list)
+    markers: list[MarkerConfig] = field(default_factory=list)
     render: RenderConfig = field(default_factory=RenderConfig)
     video: VideoConfig = field(default_factory=VideoConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)
@@ -180,14 +246,40 @@ class ProjectConfig:
             if part.id in seen:
                 raise ValueError(f"duplicate part id: {part.id}")
             seen.add(part.id)
+        if not self.voice_parts:
+            raise ValueError(
+                "project must declare at least one part with role 'voice'; "
+                "reference and accompaniment parts are never practice targets"
+            )
+
+        self.sections.sort(key=lambda section: section.from_bar)
+        previous: SectionConfig | None = None
+        for section in self.sections:
+            if previous is not None and section.from_bar <= previous.to_bar:
+                raise ValueError(
+                    f"sections {previous.name!r} and {section.name!r} overlap "
+                    f"at bar {section.from_bar}"
+                )
+            previous = section
+        self.markers.sort(key=lambda marker: marker.bar)
 
     @property
     def voice_parts(self) -> list[PartConfig]:
         return [p for p in self.parts if p.is_voice]
 
     @property
+    def reference_parts(self) -> list[PartConfig]:
+        return [p for p in self.parts if p.is_reference]
+
+    @property
     def accompaniment_parts(self) -> list[PartConfig]:
         return [p for p in self.parts if not p.is_voice]
+
+    def section_at_bar(self, bar: int) -> SectionConfig | None:
+        for section in self.sections:
+            if section.contains_bar(bar):
+                return section
+        return None
 
     def part(self, part_id: str) -> PartConfig:
         for candidate in self.parts:
@@ -217,6 +309,8 @@ class ProjectConfig:
             raise ValueError(f"project file is missing required keys: {missing}")
 
         parts = [PartConfig(**part) for part in raw["parts"]]
+        sections = [SectionConfig(**section) for section in raw.get("sections", [])]
+        markers = [MarkerConfig(**marker) for marker in raw.get("markers", [])]
         return cls(
             title=raw["title"],
             source=Path(raw["source"]),
@@ -227,6 +321,8 @@ class ProjectConfig:
             rights_note=raw.get("rights_note", ""),
             channel_name=raw.get("channel_name", ""),
             parts=parts,
+            sections=sections,
+            markers=markers,
             render=RenderConfig(**raw.get("render", {})),
             video=VideoConfig(**raw.get("video", {})),
             outputs=OutputConfig(**raw.get("outputs", {})),

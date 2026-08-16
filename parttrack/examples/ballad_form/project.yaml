@@ -1,0 +1,52 @@
+# Public-domain fixture shaped like a theatre power ballad.
+#
+# Exercises the features real show scores need and a four-part hymn does not:
+# a solo cue line nobody practises from, free-tempo sections the click must stay
+# out of, a mid-piece modulation, and a ritard into the ending.
+
+title: "Ballad Form"
+work: "구조 검증용 (퍼블릭 도메인)"
+composer: "NEW BRITAIN (1835) 선율 기반 · 편곡 자체 제작"
+key: "G Major → A♭ Major"
+rights: public-domain
+
+source: ballad_form.mid
+out_dir: build
+
+parts:
+  # The solo is always audible so backing singers know where they are, but it
+  # is never a practice target — no deliverables are generated for it.
+  - { id: solo,  name: "솔로",   track: 1, role: reference, color: "#f8f9fa" }
+  - { id: alto,  name: "알토",   track: 2 }
+  - { id: tenor, name: "테너",   track: 3 }
+  - { id: bass,  name: "베이스", track: 4 }
+  - { id: piano, name: "반주",   track: 5, role: accompaniment }
+
+sections:
+  - { name: "1절 (Colla Voce)", from_bar: 1,  to_bar: 8,  rubato: true }
+  - { name: "백보컬 진입",       from_bar: 9,  to_bar: 12, click: true }
+  - { name: "전조 후 후렴",      from_bar: 13, to_bar: 14, click: true }
+  - { name: "엔딩 (Rall.)",      from_bar: 15, to_bar: 16, tempo_scale: 0.82, click: false }
+
+markers:
+  - { bar: 9,  label: "백보컬 진입", color: "#4dabf7" }
+  - { bar: 13, label: "전조 +1", color: "#ffd43b" }
+
+render:
+  lead_program: 52        # Choir Aahs for the part being learned
+  backing_program: 0      # Piano for the other voices
+  reference_program: 73   # Flute for the solo cue — audible, unmistakably not a part
+  count_in_bars: 1
+  click_through: false    # sections opt in; rubato passages stay silent
+
+video:
+  width: 1280
+  height: 720
+  fps: 30
+  px_per_second: 110
+
+outputs:
+  variants: [per_part, part_only, full]
+  tempo_variants:
+    "": 1.0
+  audio_format: mp3

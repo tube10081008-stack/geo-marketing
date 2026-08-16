@@ -34,7 +34,12 @@ python3 -m parttrack.cli doctor    # 의존성 확인
 
 ## 빠른 시작
 
-퍼블릭 도메인 예제(Amazing Grace SATB)로 전체 파이프라인을 검증합니다.
+퍼블릭 도메인 예제 두 개가 들어 있습니다. 둘 다 권리 부담 없이 돌려볼 수 있습니다.
+
+| 예제 | 형태 | 검증하는 것 |
+|---|---|---|
+| `examples/amazing_grace` | 4성부 찬송가 | 기본 SATB 파트 분리 |
+| `examples/ballad_form` | 솔로 + 백보컬 발라드 | 섹션·마커·가이드 성부 |
 
 ```bash
 cd parttrack
@@ -82,15 +87,24 @@ parts:
   - { id: alto,    name: "알토",     track: 2 }
   - { id: tenor,   name: "테너",     track: 3 }
   - { id: bass,    name: "베이스",   track: 4 }
-  # role: accompaniment 을 주면 반주 트랙으로 취급되어 모든 믹스에 배경으로 깔립니다.
+
+sections:                # 선택 사항 — 마디 구간별 템포·클릭 제어
+  - { name: "1절 (Colla Voce)", from_bar: 1,  to_bar: 8,  rubato: true }
+  - { name: "후렴",             from_bar: 9,  to_bar: 14, click: true }
+  - { name: "엔딩 (Rall.)",     from_bar: 15, to_bar: 16, tempo_scale: 0.82, click: false }
+
+markers:                 # 선택 사항 — 피아노롤에 세로선 + 라벨
+  - { bar: 13, label: "전조 +1", color: "#ffd43b" }
 
 render:
   lead_program: 52       # 강조 성부 GM 음색
   backing_program: 0     # 배경 성부 GM 음색
+  reference_program: 73  # 가이드 성부 GM 음색
   lead_velocity: 112
   backing_velocity: 58
   backing_volume: 46
   count_in_bars: 1       # 카운트인 클릭 마디 수
+  click_through: false   # 전 구간 클릭. 섹션이 개별로 덮어씁니다
   pan_spread: 26
 
 video:
@@ -109,6 +123,29 @@ outputs:
 ```
 
 `track`을 생략하면 소스에서 음표가 있는 트랙 순서대로 자동 배정됩니다.
+
+### 성부 역할 (`role`)
+
+| role | 산출물 생성 | 믹스에서의 위치 |
+|---|---|---|
+| `voice` (기본) | ✅ 성부별 영상 생성 | 강조 또는 배경 |
+| `reference` | ❌ | **항상 들림** — 솔로 멜로디·지휘 가이드. 위치 확인용이지 연습 대상이 아님 |
+| `accompaniment` | ❌ | 항상 배경 — 피아노 리덕션, 밴드 트랙 |
+
+뮤지컬 넘버는 대개 솔로 위에 백보컬이 얹히는 구조입니다. 솔로를 `reference`로 두면
+백보컬 단원이 자기 진입 지점을 들으면서 연습할 수 있고, 솔로용 영상은 만들지 않습니다.
+
+### 섹션과 마커
+
+실제 극장 악보는 메트로놈처럼 흐르지 않습니다. Colla voce 구간은 지휘가 가수를 따라가고
+엔딩은 rall.합니다. 섹션을 선언하면:
+
+- `rubato: true` — 클릭이 자동으로 꺼집니다 (지휘를 따라가는 구간에 클릭을 깔면 방해만 됩니다)
+- `click: true / false` — 구간별 클릭을 명시적으로 켜고 끕니다
+- `tempo_scale` — 해당 구간만 느리게/빠르게 (rall., 느린 연습 구간)
+- 영상 상단에 구간 이름이 띠로 표시되고, 유튜브 챕터가 마디 단위가 아니라 **구간 이름**으로 생성됩니다
+
+`markers`는 전조·성부 진입처럼 눈에 띄어야 하는 지점에 세로선과 라벨을 그립니다.
 
 ## 실제 악보 투입
 

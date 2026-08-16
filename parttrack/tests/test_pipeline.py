@@ -17,6 +17,7 @@ from parttrack.mixdown import (  # noqa: E402
     LEVEL_BACKING,
     LEVEL_LEAD,
     LEVEL_MUTED,
+    LEVEL_REFERENCE,
     MixSpec,
     build_mix,
     count_in_seconds,
@@ -24,6 +25,14 @@ from parttrack.mixdown import (  # noqa: E402
     resolve_levels,
 )
 from parttrack.score import load_score  # noqa: E402
+from parttrack.timing import (  # noqa: E402
+    bar_tick,
+    effective_tempo_map,
+    marker_points,
+    running_click_ticks,
+    section_spans,
+)
+from parttrack.timing import count_in_seconds as timing_count_in  # noqa: E402
 
 TICKS_PER_BEAT = 480
 
@@ -62,8 +71,9 @@ def _write_source(path: Path, parts: int = 4, bars: int = 4) -> Path:
     return path
 
 
-def _project(tmp_path: Path, **overrides) -> ProjectConfig:
-    source = _write_source(tmp_path / "source.mid")
+def _project(tmp_path: Path, bars: int = 4, **overrides) -> ProjectConfig:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    source = _write_source(tmp_path / "source.mid", bars=bars)
     raw = {
         "title": "테스트 곡",
         "work": "테스트 작품",
@@ -255,7 +265,8 @@ def test_channels_avoid_the_drum_channel(tmp_path: Path) -> None:
         m.channel
         for track in midi.tracks
         for m in track
-        if m.type == "note_on" and not any(x.type == "track_name" and x.name == "count-in" for x in track)
+        if m.type == "note_on"
+        and not any(x.type == "track_name" and x.name == "click" for x in track)
     }
     assert DRUM_CHANNEL not in voice_channels
 
@@ -271,8 +282,31 @@ def test_metadata_is_part_specific(tmp_path: Path) -> None:
     assert "베이스" in metadata.description
     assert "퍼블릭 도메인" in metadata.description
     assert "테스트 곡 베이스" in metadata.tags
-    assert metadata.chapters[0] == (0.0, "카운트인")
     assert len(metadata.tags) == len(set(metadata.tags))
+
+
+def test_short_score_emits_no_chapters(tmp_path: Path) -> None:
+    """YouTube ignores chapter lists under three entries, so we omit them."""
+    project = _project(tmp_path, bars=4)  # eight seconds total
+    score = load_score(project)
+    metadata = build_metadata(
+        project, score, MixSpec("per_part", "bass"), count_in_s=2.0
+    )
+    assert metadata.chapters == []
+
+
+def test_long_score_gets_spaced_chapters(tmp_path: Path) -> None:
+    project = _project(tmp_path, bars=40)  # eighty seconds
+    score = load_score(project)
+    metadata = build_metadata(
+        project, score, MixSpec("per_part", "bass"), count_in_s=2.0
+    )
+    assert metadata.chapters[0] == (0.0, "카운트인")
+    assert len(metadata.chapters) >= 3
+    gaps = [
+        b[0] - a[0] for a, b in zip(metadata.chapters, metadata.chapters[1:])
+    ]
+    assert all(gap >= 10.0 for gap in gaps)
 
 
 def test_metadata_marks_slow_variant(tmp_path: Path) -> None:
@@ -295,3 +329,225 @@ def test_missing_source_is_reported(tmp_path: Path) -> None:
 def test_invalid_variant_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="unknown variant"):
         _project(tmp_path, outputs={"variants": ["bogus"]})
+
+
+# --- reference parts -------------------------------------------------------
+
+
+def _ballad_project(tmp_path: Path, bars: int = 8, **overrides) -> ProjectConfig:
+    """A solo cue line plus three backing voices, like a theatre ballad."""
+    defaults = {
+        "parts": [
+            {"id": "solo", "name": "솔로", "track": 1, "role": "reference"},
+            {"id": "alto", "name": "알토", "track": 2},
+            {"id": "tenor", "name": "테너", "track": 3},
+            {"id": "bass", "name": "베이스", "track": 4},
+        ]
+    }
+    defaults.update(overrides)
+    return _project(tmp_path, bars=bars, **defaults)
+
+
+def test_reference_part_is_never_a_practice_target(tmp_path: Path) -> None:
+    project = _ballad_project(tmp_path)
+    specs = plan_mixes(project)
+    assert "solo" not in {spec.lead_part_id for spec in specs}
+    # three voices x per_part, plus one full mix
+    assert len(specs) == 4
+
+
+def test_reference_part_survives_every_variant(tmp_path: Path) -> None:
+    project = _ballad_project(tmp_path)
+    for spec in (
+        MixSpec("per_part", "alto"),
+        MixSpec("part_only", "alto"),
+        MixSpec("full", None),
+    ):
+        levels = resolve_levels(project, spec)
+        assert levels["solo"] == LEVEL_REFERENCE, spec.variant
+
+
+def test_reference_part_gets_its_own_voice(tmp_path: Path) -> None:
+    project = _ballad_project(tmp_path)
+    score = load_score(project)
+    midi = build_mix(project, score, MixSpec("part_only", "alto"))
+
+    tracks = {
+        next((m.name for m in track if m.type == "track_name"), ""): track
+        for track in midi.tracks
+    }
+    solo = tracks["solo"]
+    programs = [m.program for m in solo if m.type == "program_change"]
+    volumes = [m.value for m in solo if m.type == "control_change" and m.control == 7]
+    assert programs == [project.render.reference_program]
+    assert volumes == [project.render.reference_volume]
+    # Audible above the muted voices but below the part being learned.
+    assert project.render.backing_volume < volumes[0] < project.render.lead_volume
+
+
+def test_project_without_voice_parts_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="role 'voice'"):
+        _project(
+            tmp_path,
+            parts=[
+                {"id": "solo", "name": "솔로", "track": 1, "role": "reference"},
+                {"id": "piano", "name": "반주", "track": 2, "role": "accompaniment"},
+            ],
+        )
+
+
+# --- sections and markers --------------------------------------------------
+
+
+def test_section_tempo_override_lands_on_its_barline(tmp_path: Path) -> None:
+    project = _project(
+        tmp_path,
+        bars=8,
+        sections=[{"name": "엔딩", "from_bar": 5, "to_bar": 8, "tempo_scale": 0.5}],
+    )
+    score = load_score(project)
+    tempo_map = effective_tempo_map(project, score)
+
+    boundary = bar_tick(score, 5)
+    assert boundary == score.ticks_per_bar * 4
+    # Half speed means twice as many microseconds per beat.
+    assert tempo_map.tempo_at(boundary - 1) == pytest.approx(mido.bpm2tempo(120), rel=1e-3)
+    assert tempo_map.tempo_at(boundary) == pytest.approx(
+        mido.bpm2tempo(120) / 0.5, rel=1e-3
+    )
+
+
+def test_section_tempo_stretches_output_duration(tmp_path: Path) -> None:
+    plain = _project(tmp_path / "a", bars=8)
+    slowed = _project(
+        tmp_path / "b",
+        bars=8,
+        sections=[{"name": "엔딩", "from_bar": 5, "to_bar": 8, "tempo_scale": 0.5}],
+    )
+    plain_score, slowed_score = load_score(plain), load_score(slowed)
+    end = plain_score.duration_tick
+
+    plain_end = effective_tempo_map(plain, plain_score).tick_to_second(end)
+    slowed_end = effective_tempo_map(slowed, slowed_score).tick_to_second(end)
+    # The second half takes twice as long; the first half is untouched.
+    assert slowed_end == pytest.approx(plain_end * 1.5, rel=1e-3)
+
+
+def test_click_is_off_by_default_and_on_when_asked(tmp_path: Path) -> None:
+    quiet = _project(tmp_path / "a", bars=8)
+    assert running_click_ticks(quiet, load_score(quiet)) == []
+
+    loud = _project(tmp_path / "b", bars=8, render={"click_through": True})
+    score = load_score(loud)
+    clicks = running_click_ticks(loud, score)
+    assert len(clicks) == 8 * 4  # eight bars of 4/4
+    assert clicks[0] == (0, True)
+    assert clicks[1][1] is False
+
+
+def test_rubato_section_silences_the_click(tmp_path: Path) -> None:
+    project = _project(
+        tmp_path,
+        bars=8,
+        render={"click_through": True},
+        sections=[
+            {"name": "콜라보체", "from_bar": 1, "to_bar": 4, "rubato": True},
+            {"name": "본진행", "from_bar": 5, "to_bar": 8},
+        ],
+    )
+    score = load_score(project)
+    clicks = running_click_ticks(project, score)
+
+    assert len(clicks) == 16  # only the second half
+    assert min(tick for tick, _ in clicks) == bar_tick(score, 5)
+
+
+def test_section_can_opt_into_click_when_default_is_off(tmp_path: Path) -> None:
+    project = _project(
+        tmp_path,
+        bars=8,
+        sections=[{"name": "후렴", "from_bar": 5, "to_bar": 8, "click": True}],
+    )
+    score = load_score(project)
+    clicks = running_click_ticks(project, score)
+    assert len(clicks) == 16
+    assert all(tick >= bar_tick(score, 5) for tick, _ in clicks)
+
+
+def test_running_click_lands_on_the_drum_channel(tmp_path: Path) -> None:
+    project = _project(tmp_path, bars=8, render={"click_through": True})
+    score = load_score(project)
+    midi = build_mix(project, score, MixSpec("full", None))
+
+    click_track = next(
+        track
+        for track in midi.tracks
+        if any(m.type == "track_name" and m.name == "click" for m in track)
+    )
+    hits = [m for m in click_track if m.type == "note_on" and m.velocity > 0]
+    # One count-in bar plus eight bars of running click, all on channel 9.
+    assert len(hits) == 4 + 32
+    assert {m.channel for m in hits} == {DRUM_CHANNEL}
+
+
+def test_sections_drive_chapters(tmp_path: Path) -> None:
+    project = _project(
+        tmp_path,
+        bars=40,
+        sections=[
+            {"name": "1절", "from_bar": 1, "to_bar": 20},
+            {"name": "후렴", "from_bar": 21, "to_bar": 40},
+        ],
+        markers=[{"bar": 21, "label": "전조 +1"}],
+    )
+    score = load_score(project)
+    metadata = build_metadata(
+        project, score, MixSpec("per_part", "bass"), count_in_s=2.0
+    )
+    labels = [label for _, label in metadata.chapters]
+    assert any("1절" in label for label in labels)
+    assert any("후렴" in label for label in labels)
+    # The marker shares bar 21 with the section, so thinning keeps just one.
+    assert len(metadata.chapters) == len(set(labels))
+
+
+def test_section_spans_report_output_times(tmp_path: Path) -> None:
+    project = _project(
+        tmp_path,
+        bars=8,
+        sections=[
+            {"name": "전반", "from_bar": 1, "to_bar": 4},
+            {"name": "후반", "from_bar": 5, "to_bar": 8},
+        ],
+    )
+    score = load_score(project)
+    spans = section_spans(project, score)
+    count_in = timing_count_in(project, score)
+
+    assert [span.name for span in spans] == ["전반", "후반"]
+    assert spans[0].start_s == pytest.approx(count_in, abs=0.01)
+    # Four bars of 4/4 at 120 BPM is eight seconds.
+    assert spans[1].start_s == pytest.approx(count_in + 8.0, abs=0.01)
+
+
+def test_marker_beyond_the_score_is_reported(tmp_path: Path) -> None:
+    project = _project(tmp_path, bars=4, markers=[{"bar": 99, "label": "없는 마디"}])
+    score = load_score(project)
+    with pytest.raises(ValueError, match="only has 4 bars"):
+        marker_points(project, score)
+
+
+def test_overlapping_sections_are_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="overlap"):
+        _project(
+            tmp_path,
+            sections=[
+                {"name": "A", "from_bar": 1, "to_bar": 8},
+                {"name": "B", "from_bar": 5, "to_bar": 12},
+            ],
+        )
+
+
+def test_backwards_section_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="to_bar precedes from_bar"):
+        _project(tmp_path, sections=[{"name": "A", "from_bar": 8, "to_bar": 4}])

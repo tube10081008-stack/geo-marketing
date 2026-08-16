@@ -14,12 +14,15 @@ import mido
 
 from .config import ProjectConfig
 from .score import Score
+from .timing import effective_tempo_map, running_click_ticks
+from .timing import count_in_seconds as _count_in_seconds
 
 # Channel 9 is reserved for percussion by the General MIDI spec; the click
 # track lives there and voices route around it.
 DRUM_CHANNEL = 9
 
 LEVEL_LEAD = "lead"
+LEVEL_REFERENCE = "reference"
 LEVEL_BACKING = "backing"
 LEVEL_MUTED = "muted"
 
@@ -69,7 +72,11 @@ def resolve_levels(project: ProjectConfig, spec: MixSpec) -> dict[str, str]:
     """Decide how loud each part sits in a given mix."""
     levels: dict[str, str] = {}
     for part in project.parts:
-        if not part.is_voice:
+        if part.is_reference:
+            # A solo melody or conductor's cue: audible in every mix so singers
+            # know where they are, but never something they learn from here.
+            levels[part.id] = LEVEL_REFERENCE
+        elif not part.is_voice:
             # Accompaniment (piano reduction, band track) is always present as
             # harmonic context but never competes with the voice being learned.
             levels[part.id] = LEVEL_BACKING
@@ -165,7 +172,7 @@ def build_mix(project: ProjectConfig, score: Score, spec: MixSpec) -> mido.MidiF
             ),
         ),
     ]
-    scaled_tempo = score.tempo_map.scaled(spec.tempo_scale)
+    scaled_tempo = effective_tempo_map(project, score, spec.tempo_scale)
     for index, (tick, tempo) in enumerate(scaled_tempo.changes):
         # The count-in runs at the score's opening tempo, so the first tempo
         # event stays at tick 0 and later changes move with the music.
@@ -173,16 +180,23 @@ def build_mix(project: ProjectConfig, score: Score, spec: MixSpec) -> mido.MidiF
         meta_events.append((position, 0, mido.MetaMessage("set_tempo", tempo=tempo, time=0)))
     midi.tracks.append(_to_delta_track(meta_events))
 
-    # --- count-in click ---------------------------------------------------
-    if render.count_in_bars > 0:
+    # --- click: count-in, plus any sections that asked for one -------------
+    beats_per_bar = max(1, int(round(score.ticks_per_bar / score.ticks_per_beat)))
+    clicks: list[tuple[int, bool]] = [
+        (beat * score.ticks_per_beat, beat % beats_per_bar == 0)
+        for beat in range(render.count_in_bars * beats_per_bar)
+    ]
+    # Sections marked rubato or click:false stay silent, so a colla voce verse
+    # is not dragged onto a grid the conductor is deliberately ignoring.
+    clicks.extend(
+        (tick + shift, downbeat) for tick, downbeat in running_click_ticks(project, score)
+    )
+
+    if clicks:
         click_events: list[tuple[int, int, mido.Message]] = [
-            (0, 0, mido.MetaMessage("track_name", name="count-in", time=0))
+            (0, 0, mido.MetaMessage("track_name", name="click", time=0))
         ]
-        beats_per_bar = max(1, int(round(score.ticks_per_bar / score.ticks_per_beat)))
-        total_beats = render.count_in_bars * beats_per_bar
-        for beat in range(total_beats):
-            at = beat * score.ticks_per_beat
-            accent = beat % beats_per_bar == 0
+        for at, accent in clicks:
             note = render.click_accent_note if accent else render.click_note
             velocity = render.click_velocity if accent else max(1, render.click_velocity - 22)
             click_events.append(
@@ -220,9 +234,19 @@ def build_mix(project: ProjectConfig, score: Score, spec: MixSpec) -> mido.MidiF
             continue
         channel = channels[part.id]
         is_lead = level == LEVEL_LEAD
-        program = render.lead_program if is_lead else render.backing_program
-        volume = render.lead_volume if is_lead else render.backing_volume
-        target_velocity = render.lead_velocity if is_lead else render.backing_velocity
+        program, volume, target_velocity = {
+            LEVEL_LEAD: (render.lead_program, render.lead_volume, render.lead_velocity),
+            LEVEL_REFERENCE: (
+                render.reference_program,
+                render.reference_volume,
+                render.reference_velocity,
+            ),
+            LEVEL_BACKING: (
+                render.backing_program,
+                render.backing_volume,
+                render.backing_velocity,
+            ),
+        }[level]
 
         events: list[tuple[int, int, mido.Message]] = [
             (
@@ -293,7 +317,4 @@ def write_mix(
 
 def count_in_seconds(project: ProjectConfig, score: Score, spec: MixSpec) -> float:
     """How much silence-plus-click precedes bar 1, in output time."""
-    if project.render.count_in_bars <= 0:
-        return 0.0
-    scaled = score.tempo_map.scaled(spec.tempo_scale)
-    return scaled.tick_to_second(project.render.count_in_bars * score.ticks_per_bar)
+    return _count_in_seconds(project, score, spec.tempo_scale)

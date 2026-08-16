@@ -17,8 +17,15 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .audio import require
 from .config import ProjectConfig
-from .mixdown import LEVEL_LEAD, LEVEL_MUTED, MixSpec
+from .mixdown import (
+    LEVEL_BACKING,
+    LEVEL_LEAD,
+    LEVEL_MUTED,
+    LEVEL_REFERENCE,
+    MixSpec,
+)
 from .score import Score
+from .timing import effective_tempo_map, marker_points, section_spans
 
 FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
@@ -30,9 +37,14 @@ FONT_CANDIDATES = (
 )
 
 BACKING_DIM = 0.38
+# Reference lines sit between the lead and the backing: clearly present as a
+# cue, clearly not the part being learned.
+REFERENCE_DIM = 0.6
 ACTIVE_MIX = 0.45
 PITCH_PADDING = 2
 MIN_NOTE_HEIGHT = 3
+STRIP_HEIGHT = 28  # section/marker label band above the roll
+LABEL_MERGE_PX = 6  # markers this close to a section start share its label
 
 
 def find_font(size: int) -> ImageFont.FreeTypeFont:
@@ -95,7 +107,10 @@ class PianoRollRenderer:
         self.count_in_s = count_in_s
         self.duration_s = duration_s
         self.video = project.video
-        self.tempo_map = score.tempo_map.scaled(spec.tempo_scale)
+        self.tempo_map = effective_tempo_map(project, score, spec.tempo_scale)
+        self.sections = section_spans(project, score, spec.tempo_scale)
+        self.markers = marker_points(project, score, spec.tempo_scale)
+        self.strip_height = STRIP_HEIGHT if (self.sections or self.markers) else 0
 
         self._notes: list[_DrawnNote] = []
         self._canvas: np.ndarray | None = None
@@ -130,9 +145,14 @@ class PianoRollRenderer:
         canvas = np.zeros((roll_h, canvas_w, 3), dtype=np.uint8)
         canvas[:, :] = video.background_rgb
 
+        # Sections and markers occupy a band above the notes.
+        strip_h = self.strip_height
+        lane_top = strip_h
+        lane_area = roll_h - lane_top
+
         low, high = self._pitch_bounds()
         span = max(1, high - low + 1)
-        lane_h = roll_h / span
+        lane_h = lane_area / span
 
         def lane_y(pitch: int) -> tuple[int, int]:
             top = roll_h - (pitch - low + 1) * lane_h
@@ -140,7 +160,10 @@ class PianoRollRenderer:
             y1 = int(round(top + lane_h))
             if y1 - y0 < MIN_NOTE_HEIGHT:
                 y1 = y0 + MIN_NOTE_HEIGHT
-            return max(0, y0), min(roll_h, y1)
+            return max(lane_top, y0), min(roll_h, y1)
+
+        def time_x(at_s: float) -> int:
+            return video.playhead_x + int(at_s * pps)
 
         # Octave banding gives the eye a stable vertical reference.
         band = _blend(video.background_rgb, (255, 255, 255), 0.045)
@@ -151,21 +174,24 @@ class PianoRollRenderer:
                 canvas[y0:y1, :] = band
             if pitch % 12 == 0:  # every C
                 y0, _ = lane_y(pitch)
-                canvas[max(0, y0 - 1) : y0 + 1, :] = line
+                canvas[max(lane_top, y0 - 1) : y0 + 1, :] = line
 
         # Barlines, so a singer can locate a rehearsal mark by eye.
         barline = _blend(video.background_rgb, (255, 255, 255), 0.10)
         downbeat = _blend(video.background_rgb, (255, 255, 255), 0.20)
         for index, tick in enumerate(self.score.bar_ticks()):
-            x = video.playhead_x + int(self._time_of(tick) * pps)
+            x = time_x(self._time_of(tick))
             if 0 <= x < canvas_w:
-                canvas[:, x : x + 1] = downbeat if index % 4 == 0 else barline
+                canvas[lane_top:, x : x + 1] = downbeat if index % 4 == 0 else barline
 
         # Notes, painted back to front so the lead sits on top.
         drawn: list[_DrawnNote] = []
+        paint_order = {LEVEL_BACKING: 0, LEVEL_REFERENCE: 1, LEVEL_LEAD: 2}
         ordered = sorted(
             self.score.notes,
-            key=lambda note: self.levels.get(note.part_id, LEVEL_MUTED) == LEVEL_LEAD,
+            key=lambda note: paint_order.get(
+                self.levels.get(note.part_id, LEVEL_MUTED), 0
+            ),
         )
         for note in ordered:
             level = self.levels.get(note.part_id, LEVEL_MUTED)
@@ -173,12 +199,17 @@ class PianoRollRenderer:
                 continue
             is_lead = level == LEVEL_LEAD
             base = self.project.part(note.part_id).rgb
-            color = base if is_lead else _dim(base, BACKING_DIM)
+            if is_lead:
+                color = base
+            elif level == LEVEL_REFERENCE:
+                color = _dim(base, REFERENCE_DIM)
+            else:
+                color = _dim(base, BACKING_DIM)
 
             start_s = self._time_of(note.start_tick)
             end_s = self._time_of(note.end_tick)
-            x0 = video.playhead_x + int(start_s * pps)
-            x1 = video.playhead_x + int(end_s * pps)
+            x0 = time_x(start_s)
+            x1 = time_x(end_s)
             x1 = max(x1 - 1, x0 + 2)  # 1px gap between repeated notes
             y0, y1 = lane_y(note.pitch)
             if x0 >= canvas_w:
@@ -190,8 +221,71 @@ class PianoRollRenderer:
                 _DrawnNote(x0, x1, y0, y1, start_s, end_s, color, is_lead)
             )
 
+        # Marker lines run the full height so a modulation is impossible to miss.
+        for marker in self.markers:
+            x = time_x(marker.at_s)
+            if 0 <= x < canvas_w:
+                canvas[lane_top:, max(0, x - 1) : x + 2] = marker.rgb
+
+        if strip_h:
+            self._paint_strip(canvas, canvas_w, strip_h, time_x)
+
         self._notes = drawn
         return canvas
+
+    def _paint_strip(self, canvas, canvas_w: int, strip_h: int, time_x) -> None:
+        """Draw the section/marker label band across the top of the roll."""
+        video = self.video
+        image = Image.new(
+            "RGB", (canvas_w, strip_h), _blend(video.background_rgb, (255, 255, 255), 0.03)
+        )
+        draw = ImageDraw.Draw(image)
+        font = find_font(19)
+
+        # A marker that lands on a section boundary shares that section's label
+        # instead of printing on top of it.
+        merged: dict[int, list] = {}
+        consumed: set[int] = set()
+        for section_index, section in enumerate(self.sections):
+            section_x = time_x(section.start_s)
+            for marker_index, marker in enumerate(self.markers):
+                if abs(time_x(marker.at_s) - section_x) <= LABEL_MERGE_PX:
+                    merged.setdefault(section_index, []).append(marker)
+                    consumed.add(marker_index)
+
+        for index, section in enumerate(self.sections):
+            x0 = max(0, time_x(section.start_s))
+            x1 = min(canvas_w, time_x(section.end_s))
+            if x1 <= x0:
+                continue
+            shade = 0.10 if index % 2 == 0 else 0.055
+            draw.rectangle(
+                [x0, 0, x1 - 1, strip_h - 1],
+                fill=_blend(video.background_rgb, (255, 255, 255), shade),
+            )
+            draw.line([(x0, 0), (x0, strip_h)], fill=(120, 128, 142), width=1)
+
+            label = section.name
+            if section.rubato:
+                label = f"{label} (자유 템포)"
+            elif section.tempo_scale != 1.0:
+                label = f"{label} ({int(round(section.tempo_scale * 100))}%)"
+            draw.text((x0 + 10, 4), label, font=font, fill=(214, 220, 232))
+
+            offset = x0 + 10 + int(draw.textlength(label, font=font))
+            for marker in merged.get(index, []):
+                draw.text((offset + 10, 4), marker.label, font=font, fill=marker.rgb)
+                offset += 10 + int(draw.textlength(marker.label, font=font))
+
+        for marker_index, marker in enumerate(self.markers):
+            x = time_x(marker.at_s)
+            if not 0 <= x < canvas_w:
+                continue
+            draw.line([(x, 0), (x, strip_h)], fill=marker.rgb, width=2)
+            if marker_index not in consumed:
+                draw.text((x + 8, 4), marker.label, font=font, fill=marker.rgb)
+
+        canvas[0:strip_h] = np.array(image, dtype=np.uint8)
 
     # -- header -----------------------------------------------------------
     def _build_header(self) -> np.ndarray:
@@ -243,16 +337,26 @@ class PianoRollRenderer:
                 continue
             is_lead = level == LEVEL_LEAD
             label = part.name or part.id
+            if level == LEVEL_REFERENCE:
+                label = f"{label} (가이드)"
             text_width = int(draw.textlength(label, font=chip_font))
             x -= text_width
             draw.text(
                 (x, 26),
                 label,
                 font=chip_font,
-                fill=(238, 238, 240) if is_lead else (130, 136, 148),
+                fill={
+                    LEVEL_LEAD: (238, 238, 240),
+                    LEVEL_REFERENCE: (176, 182, 194),
+                    LEVEL_BACKING: (130, 136, 148),
+                }[level],
             )
             x -= 12
-            swatch = part.rgb if is_lead else _dim(part.rgb, BACKING_DIM)
+            swatch = {
+                LEVEL_LEAD: part.rgb,
+                LEVEL_REFERENCE: _dim(part.rgb, REFERENCE_DIM),
+                LEVEL_BACKING: _dim(part.rgb, BACKING_DIM),
+            }[level]
             draw.rectangle([x - 14, 28, x - 2, 40], fill=swatch)
             x -= 32
 

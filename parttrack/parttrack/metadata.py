@@ -14,6 +14,10 @@ from pathlib import Path
 from .config import ProjectConfig
 from .mixdown import MixSpec
 from .score import Score
+from .timing import effective_tempo_map, marker_points, section_spans
+
+# YouTube drops a chapter list whose entries sit closer together than this.
+MIN_CHAPTER_GAP = 10.0
 
 VARIANT_LABELS = {
     "per_part": "{part} 파트 강조",
@@ -136,10 +140,22 @@ def _build_description(
         "■ 사용 방법",
         "1. 한 마디 카운트인 클릭에 맞춰 들어오세요.",
         "2. 화면의 피아노롤에서 자기 파트 색을 따라가며 음정을 확인하세요.",
-        f"3. 익숙해지면 '전체 합창' 버전으로 넘어가 화음 속 균형을 확인하세요.",
-        "",
-        "■ 정보",
+        "3. 익숙해지면 '전체 합창' 버전으로 넘어가 화음 속 균형을 확인하세요.",
     ]
+
+    rubato = [
+        span
+        for span in section_spans(project, score, spec.tempo_scale)
+        if span.rubato or not span.click
+    ]
+    if rubato:
+        names = ", ".join(f"{span.name}({span.from_bar}~{span.to_bar}마디)" for span in rubato)
+        lines.append(
+            f"※ {names} 구간은 지휘를 따라가는 자유 템포입니다. 클릭 없이 진행되니 "
+            "음정과 흐름만 익히고, 실제 박은 연습에서 지휘에 맞추세요."
+        )
+
+    lines.extend(["", "■ 정보"])
 
     info: list[tuple[str, str]] = [("작품", work), ("곡", project.title)]
     if project.composer:
@@ -147,6 +163,14 @@ def _build_description(
     if project.key:
         info.append(("조성", project.key))
     info.append(("성부", part_name))
+    if project.reference_parts:
+        info.append(
+            (
+                "가이드",
+                ", ".join(p.name or p.id for p in project.reference_parts)
+                + " (위치 확인용, 연습 대상 아님)",
+            )
+        )
     bars = max(0, len(score.bar_ticks()) - 1)
     info.append(("마디 수", f"{bars}마디"))
     if spec.tempo_scale != 1.0:
@@ -195,18 +219,52 @@ def _build_tags(project: ProjectConfig, part_name: str) -> list[str]:
 def _build_chapters(
     project: ProjectConfig, score: Score, spec: MixSpec, count_in_s: float
 ) -> list[tuple[float, str]]:
-    """One chapter every eight bars, which is the usual rehearsal unit."""
-    chapters: list[tuple[float, str]] = []
-    if count_in_s > 0:
-        chapters.append((0.0, "카운트인"))
+    """Chapters follow the score's own sections, falling back to 8-bar blocks."""
+    # Named anchors come from the score's own structure; generic 8-bar entries
+    # fill the gaps between them so long sections stay navigable.
+    anchors: list[tuple[float, str]] = []
+    spans = section_spans(project, score, spec.tempo_scale)
+    for index, span in enumerate(spans):
+        # The count-in runs straight into the first section, so that section
+        # takes the 0:00 slot rather than burning a chapter on two seconds.
+        at = 0.0 if index == 0 else span.start_s
+        anchors.append((at, f"{span.name} ({span.from_bar}마디~)"))
+    for marker in marker_points(project, score, spec.tempo_scale):
+        anchors.append((marker.at_s, f"{marker.label} ({marker.bar}마디)"))
+    anchors = _thin_chapters(anchors, require_minimum=False)
 
-    scaled = score.tempo_map.scaled(spec.tempo_scale)
+    if not anchors and count_in_s > 0:
+        anchors.append((0.0, "카운트인"))
+
+    scaled = effective_tempo_map(project, score, spec.tempo_scale)
     bar_ticks = score.bar_ticks()
-    step = 8
-    for bar_index in range(0, max(len(bar_ticks) - 1, 0), step):
+    fillers: list[tuple[float, str]] = []
+    for bar_index in range(0, max(len(bar_ticks) - 1, 0), 8):
         at = count_in_s + scaled.tick_to_second(bar_ticks[bar_index])
-        chapters.append((at, f"{bar_index + 1}마디"))
-    return chapters
+        if any(abs(at - anchor_at) < MIN_CHAPTER_GAP for anchor_at, _ in anchors):
+            continue
+        fillers.append((at, f"{bar_index + 1}마디"))
+
+    return _thin_chapters(sorted(anchors + fillers, key=lambda item: item[0]))
+
+
+def _thin_chapters(
+    chapters: list[tuple[float, str]],
+    minimum_gap: float = MIN_CHAPTER_GAP,
+    require_minimum: bool = True,
+) -> list[tuple[float, str]]:
+    """YouTube ignores chapter lists whose entries are closer than 10 seconds."""
+    kept: list[tuple[float, str]] = []
+    for at, label in chapters:
+        if kept and at - kept[-1][0] < minimum_gap:
+            continue
+        kept.append((at, label))
+    if not require_minimum:
+        return kept
+    # A chapter list is only honoured when it starts at zero and has three entries.
+    if kept and kept[0][0] > 0:
+        kept.insert(0, (0.0, "시작"))
+    return kept if len(kept) >= 3 else []
 
 
 def write_metadata(metadata: MixMetadata, destination: Path) -> Path:
