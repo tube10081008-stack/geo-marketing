@@ -75,6 +75,42 @@ def read_bar_numbers(page, staff: Staff) -> list[tuple[float, int]]:
     return numbers
 
 
+def system_bar_numbers(page, staves: list[Staff]) -> dict[int, list[tuple[float, int]]]:
+    """Measure numbers for every staff, borrowed from its system's top staff.
+
+    Engravers print a measure number once per system, above the topmost staff.
+    Every other staff in that system — the tenor line, the piano — carries none.
+    Staves in one system share barline positions, so the numbers can be handed
+    down by matching those positions. Without this two thirds of the bars have
+    no number, and any positional fallback stacks bars from different pages on
+    top of one another, which sounds exactly as bad as it is.
+    """
+    out: dict[int, list[tuple[float, int]]] = {}
+    current: list[tuple[float, int]] = []
+    for index, staff in enumerate(staves):
+        own = enforce_monotonic(read_bar_numbers(page, staff))
+        # The engraving convention itself marks the system boundaries: a measure
+        # number is printed above the top staff of a system and nowhere else, so
+        # a staff that has its own numbers *is* the start of a system. Every
+        # staff below it belongs to that system until the next numbered staff.
+        # Geometry cannot do this reliably — systems on one page span the same
+        # width and break their bars in similar places.
+        if own:
+            current = own
+        out[index] = current
+    return out
+
+
+def enforce_monotonic(numbers: list[tuple[float, int]]) -> list[tuple[float, int]]:
+    """Drop stray digits — real measure numbers only ever increase."""
+    kept: list[tuple[float, int]] = []
+    for x, value in numbers:
+        if kept and value <= kept[-1][1]:
+            continue
+        kept.append((x, value))
+    return kept
+
+
 # Duration in eighth-note units, read off the notation rather than the spacing.
 # Horizontal position says which note comes first; it does not say how long a
 # note lasts, because engraved spacing is not linear in time — beamed groups are
@@ -141,6 +177,7 @@ def time_staff(
     beats_per_bar: float = 6.0,
     dots: list[tuple[float, float]] | None = None,
     offset: float = 0.0,
+    numbers: list[tuple[float, int]] | None = None,
 ) -> list[TimedNote]:
     """Place a staff's notes on (bar, beat) using barlines and spacing."""
     if not notes:
@@ -148,7 +185,8 @@ def time_staff(
     dots = dots or []
 
     barlines = find_barlines(page, staff)
-    numbers = read_bar_numbers(page, staff)
+    if numbers is None:
+        numbers = enforce_monotonic(read_bar_numbers(page, staff))
     if len(barlines) < 2:
         barlines = [staff.x0, staff.x1]
 
@@ -162,10 +200,21 @@ def time_staff(
         spans = [(staff.x0, staff.x1)]
 
     def bar_number(index: int, left: float, right: float) -> int:
+        """Numbered bars win; unnumbered ones count on from the last known bar.
+
+        A staff with no numbers anywhere cannot be placed in the piece at all —
+        guessing puts its bars on top of another page's, so it is skipped.
+        """
         for x, value in numbers:
             if left - 6 <= x < right:
                 return value
-        return default_bar + index
+        preceding = [value for x, value in numbers if x < left]
+        if preceding:
+            offset_from = max(preceding)
+            gap = sum(1 for a, b in spans[:index] if a >= max(
+                x for x, v in numbers if v == offset_from))
+            return offset_from + max(1, gap)
+        return -1
 
     timed: list[TimedNote] = []
     for index, (left, right) in enumerate(spans):
@@ -187,6 +236,8 @@ def time_staff(
                 durations = [d * scale for d in durations]
 
         number = bar_number(index, left, right)
+        if number < 0:
+            continue
         cursor = 0.0
         for note, duration in zip(inside, durations):
             timed.append(
